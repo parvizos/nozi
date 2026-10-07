@@ -7,6 +7,7 @@ import { getActorContext } from "@nozi/auth";
 import { UserRoleCode } from "@nozi/database";
 import { getProductBySlug, isFavorite } from "@nozi/marketplace";
 import { FavoriteButton } from "../../../components/favorite-button";
+import { AddToCart } from "../../../components/add-to-cart";
 import { MapPinIcon, StarIcon } from "../../../components/icons";
 import { formatMoney } from "../../../components/product-card";
 import { SiteFooter } from "../../../components/site-footer";
@@ -119,41 +120,14 @@ export default async function ProductPage({ params }: Props) {
             <p className="mt-6 leading-7 text-[#655753]">
               {product.description}
             </p>
-            <fieldset className="mt-7">
-              <legend className="text-sm font-semibold">
-                Размер / вариант
-              </legend>
-              <div className="mt-3 grid gap-2">
-                {product.variants.map((variant, index) => (
-                  <label
-                    className="flex cursor-pointer items-center justify-between rounded-2xl border border-[#dfd2cd] bg-white px-4 py-3 has-checked:border-[#8f2d56] has-checked:ring-1 has-checked:ring-[#8f2d56]"
-                    key={variant.id}
-                  >
-                    <span className="flex items-center gap-3">
-                      <input
-                        defaultChecked={index === 0}
-                        name="variant"
-                        type="radio"
-                        value={variant.id}
-                      />
-                      <span className="text-sm font-medium">
-                        {variant.name}
-                      </span>
-                    </span>
-                    <span className="text-sm">
-                      {variant.absolutePrice
-                        ? formatMoney(
-                            variant.absolutePrice,
-                            product.currencyCode,
-                          )
-                        : Number(variant.priceDelta) > 0
-                          ? `+ ${formatMoney(variant.priceDelta, product.currencyCode)}`
-                          : "В цене"}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <AddToCart
+              currencyCode={product.currencyCode}
+              productId={product.id}
+              productPrice={product.price}
+              returnTo={`/product/${product.slug}`}
+              signedIn={canFavorite}
+              variants={product.variants}
+            />
             <div className="mt-6 rounded-2xl bg-[#f3eee9] p-4 text-sm">
               <p className="flex items-center gap-2 font-medium">
                 <MapPinIcon className="h-4 w-4 text-[#8f2d56]" /> Подготовим
@@ -165,15 +139,7 @@ export default async function ProductPage({ params }: Props) {
                   : "Нет в наличии"}
               </p>
             </div>
-            <div className="mt-6 flex gap-3">
-              <button
-                aria-describedby="cart-note"
-                className="flex-1 cursor-not-allowed rounded-full bg-[#d7ceca] px-5 py-3.5 text-sm font-semibold text-[#756b67]"
-                disabled
-                type="button"
-              >
-                Корзина — в следующей фазе
-              </button>
+            <div className="mt-4 flex justify-end">
               <FavoriteButton
                 initialFavorite={favorite}
                 productId={product.id}
@@ -181,10 +147,6 @@ export default async function ProductPage({ params }: Props) {
                 signedIn={canFavorite}
               />
             </div>
-            <p className="mt-2 text-xs text-[#857670]" id="cart-note">
-              Оформление заказа ещё не включено; кнопка не создаёт фиктивную
-              корзину.
-            </p>
           </section>
         </div>
       </main>

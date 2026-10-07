@@ -1,6 +1,6 @@
 # NOZI
 
-NOZI is a production-minded gift marketplace MVP. The repository currently contains the Phase 1 platform foundation and the Phase 2 customer marketplace: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, searchable catalog, store and product pages, customer favorites, health endpoints and structured logging.
+NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, and Phase 3 purchase foundation: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, searchable catalog, server-side cart, transactional checkout, order history, health endpoints and structured logging.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the accepted design and delivery plan.
 
@@ -37,7 +37,9 @@ pnpm db:studio
 
 The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories and 48 products. The seed refuses demo mode in production.
 
-Catalog money uses PostgreSQL `numeric(12,2)` and Prisma `Decimal`. The marketplace data-access layer serializes amounts as decimal strings; application code must not calculate money with JavaScript floating-point numbers.
+Money uses PostgreSQL `numeric(12,2)` and Prisma `Decimal`. The marketplace data-access layer serializes amounts as decimal strings; application code must not calculate money with JavaScript floating-point numbers.
+
+Each customer has at most one active cart, and every cart belongs to one store. Checkout recalculates current product and variant prices inside a serializable database transaction. It atomically reserves inventory, creates immutable order and delivery snapshots, records both initial status changes, creates the payment record, and converts the cart. `Idempotency-Key` is required on order creation and is unique per customer and checkout scope.
 
 Development-only demo accounts:
 
@@ -69,7 +71,7 @@ apps/web                    Next.js UI and REST API
 packages/auth               Better Auth, Argon2id and RBAC policies
 packages/config             typed environment validation
 packages/database           Prisma schema, migrations and seed
-packages/marketplace        catalog queries, search, favorites and seller scope
+packages/marketplace        catalog, cart, checkout, orders and state machine
 packages/observability      structured logging and request context
 ```
 
@@ -77,14 +79,30 @@ The seller, admin and courier product interfaces are intentionally deferred to t
 
 ## Customer routes
 
-| Route              | Purpose                                             |
-| ------------------ | --------------------------------------------------- |
-| `/`                | Database-backed marketplace home                    |
-| `/catalog`         | Paginated catalog with database filters and sorting |
-| `/category/[slug]` | Category landing and filtered products              |
-| `/store/[slug]`    | Store profile and product catalog                   |
-| `/product/[slug]`  | Product media, variants, availability and favorites |
-| `/search`          | PostgreSQL-backed product and store search          |
-| `/sign-in`         | Customer sign-in for protected actions              |
+| Route                          | Purpose                                             |
+| ------------------------------ | --------------------------------------------------- |
+| `/`                            | Database-backed marketplace home                    |
+| `/catalog`                     | Paginated catalog with database filters and sorting |
+| `/category/[slug]`             | Category landing and filtered products              |
+| `/store/[slug]`                | Store profile and product catalog                   |
+| `/product/[slug]`              | Product media, variants, availability and favorites |
+| `/search`                      | PostgreSQL-backed product and store search          |
+| `/cart`                        | Server-side cart and quantity management            |
+| `/checkout`                    | Validated delivery, gift and payment details        |
+| `/order/[orderNumber]/success` | Order confirmation                                  |
+| `/orders/[orderNumber]`        | Customer-owned order status and timeline            |
+| `/account/orders`              | Customer order history                              |
+| `/sign-in`                     | Customer sign-in for protected actions              |
 
-Checkout, cart state and order creation are intentionally deferred to Phase 3. The product page communicates this and does not create browser-only cart state.
+## Customer API
+
+| Method   | Route                         | Purpose                       |
+| -------- | ----------------------------- | ----------------------------- |
+| `GET`    | `/api/v1/cart`                | Read the authenticated cart   |
+| `DELETE` | `/api/v1/cart`                | Clear the authenticated cart  |
+| `POST`   | `/api/v1/cart/items`          | Add a trusted product/variant |
+| `PATCH`  | `/api/v1/cart/items/[itemId]` | Change item quantity          |
+| `DELETE` | `/api/v1/cart/items/[itemId]` | Remove an item                |
+| `POST`   | `/api/v1/checkout/orders`     | Create an idempotent order    |
+
+The checkout endpoint accepts `CASH` and development `TEST` payment methods through the payment provider interface. It never receives or stores card data. Seller, admin and courier workflows remain deferred to their implementation phases.

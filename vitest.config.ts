@@ -7,6 +7,7 @@ export default defineConfig({
       reporter: ["text", "json", "html"],
     },
     environment: "node",
+    fileParallelism: false,
     include: ["apps/**/*.test.ts", "packages/**/*.test.ts"],
     passWithNoTests: false,
     restoreMocks: true,

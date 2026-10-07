@@ -22,3 +22,41 @@ export {
   assertSellerStoreAccess,
   getAccessibleStoreIds,
 } from "./seller-access";
+export { addCartItemSchema, updateCartItemSchema } from "./cart-contracts";
+export type { AddCartItemInput, UpdateCartItemInput } from "./cart-contracts";
+export {
+  addCartItem,
+  calculateUnitPrice,
+  clearCart,
+  getCart,
+  getCartCount,
+  getCheckoutCustomerProfile,
+  removeCartItem,
+  updateCartItem,
+} from "./cart";
+export type { CartView } from "./cart";
+export { checkoutSchema, idempotencyKeySchema } from "./checkout-contracts";
+export type { CheckoutInput } from "./checkout-contracts";
+export { placeOrder } from "./checkout";
+export type { PlaceOrderOptions, PlaceOrderResult } from "./checkout";
+export { MarketplaceError } from "./errors";
+export type { MarketplaceErrorCode } from "./errors";
+export {
+  allowedOrderTransitions,
+  systemTransitionPrincipal,
+  transitionOrder,
+  transitionOrderInTransaction,
+} from "./order-state-machine";
+export type { TransitionOrderInput } from "./order-state-machine";
+export { getCustomerOrder, listCustomerOrders } from "./orders";
+export type { CustomerOrderView } from "./orders";
+export {
+  CashPaymentProvider,
+  getPaymentProvider,
+  TestPaymentProvider,
+} from "./payments";
+export type {
+  PaymentIntentInput,
+  PaymentIntentResult,
+  PaymentProvider,
+} from "./payments";

@@ -57,6 +57,7 @@ const productCardSelect = {
   ratingCount: true,
   slug: true,
   stockQuantity: true,
+  reservedQuantity: true,
   store: { select: { name: true, slug: true } },
   currencyCode: true,
 } satisfies Prisma.ProductSelect;
@@ -84,7 +85,7 @@ function toProductCard(row: ProductCardRow): ProductCard {
     rating: row.ratingAverage.toFixed(2),
     ratingCount: row.ratingCount,
     slug: row.slug,
-    stockQuantity: row.stockQuantity,
+    stockQuantity: Math.max(0, row.stockQuantity - row.reservedQuantity),
     store: row.store,
   };
 }
@@ -303,6 +304,7 @@ export async function getProductBySlug(slug: string) {
       ratingCount: true,
       slug: true,
       stockQuantity: true,
+      reservedQuantity: true,
       store: {
         select: {
           defaultPreparationMinutes: true,
@@ -321,6 +323,7 @@ export async function getProductBySlug(slug: string) {
           name: true,
           priceDelta: true,
           stockQuantity: true,
+          reservedQuantity: true,
         },
         where: { deletedAt: null, isActive: true },
       },
@@ -342,10 +345,18 @@ export async function getProductBySlug(slug: string) {
       ...product.store,
       ratingAverage: product.store.ratingAverage.toFixed(2),
     },
+    stockQuantity: Math.max(
+      0,
+      product.stockQuantity - product.reservedQuantity,
+    ),
     variants: product.variants.map((variant) => ({
       ...variant,
       absolutePrice: variant.absolutePrice?.toFixed(2) ?? null,
       priceDelta: variant.priceDelta.toFixed(2),
+      stockQuantity: Math.max(
+        0,
+        variant.stockQuantity - variant.reservedQuantity,
+      ),
     })),
   };
 }

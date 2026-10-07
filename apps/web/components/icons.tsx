@@ -50,3 +50,12 @@ export function StarIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function BagIcon(props: IconProps) {
+  return (
+    <svg aria-hidden="true" {...base} {...props}>
+      <path d="M5 8h14l-1 13H6L5 8Z" />
+      <path d="M9 9V6a3 3 0 0 1 6 0v3" />
+    </svg>
+  );
+}

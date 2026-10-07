@@ -286,6 +286,7 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
         cityId: city.id,
         coverImageObjectKey: fixture.cover,
         defaultPreparationMinutes: 35 + index * 10,
+        deliveryFeeAmount: `${25 + index * 2}.00`,
         description: fixture.description,
         isActive: true,
         isOpen: index !== 3,
@@ -301,6 +302,7 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
       },
       update: {
         coverImageObjectKey: fixture.cover,
+        deliveryFeeAmount: `${25 + index * 2}.00`,
         deletedAt: null,
         description: fixture.description,
         isActive: true,
@@ -355,6 +357,7 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
           price: `${price}.00`,
           ratingAverage: (4.55 + (globalIndex % 9) * 0.05).toFixed(2),
           ratingCount: 8 + ((globalIndex * 7) % 89),
+          reservedQuantity: 0,
           slug,
           status: ProductStatus.ACTIVE,
           stockQuantity: 6 + (globalIndex % 19),
@@ -367,49 +370,80 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
           name,
           price: `${price}.00`,
           status: ProductStatus.ACTIVE,
-          stockQuantity: 6 + (globalIndex % 19),
           storeId: store.id,
         },
         where: { slug },
       });
 
-      await prisma.$transaction([
-        prisma.productImage.deleteMany({ where: { productId: product.id } }),
-        prisma.productVariant.deleteMany({ where: { productId: product.id } }),
-      ]);
-      await prisma.productImage.createMany({
-        data: [0, 1].map((imageIndex) => ({
-          altText: `${name}, вид ${imageIndex + 1}`,
-          height: 1200,
-          isPrimary: imageIndex === 0,
-          mimeType: "image/svg+xml",
-          objectKey: `/images/products/${category.slug}.svg`,
+      const imageFixtures = [0, 1].map((imageIndex) => ({
+        altText: `${name}, вид ${imageIndex + 1}`,
+        height: 1200,
+        isPrimary: imageIndex === 0,
+        mimeType: "image/svg+xml",
+        objectKey: `/images/products/${category.slug}.svg`,
+        productId: product.id,
+        sortOrder: imageIndex,
+        width: 1200,
+      }));
+      const existingImages = await prisma.productImage.findMany({
+        orderBy: { sortOrder: "asc" },
+        where: { productId: product.id },
+      });
+      for (const [fixtureIndex, fixture] of imageFixtures.entries()) {
+        const existing = existingImages[fixtureIndex];
+        if (existing) {
+          await prisma.productImage.update({
+            data: fixture,
+            where: { id: existing.id },
+          });
+        } else {
+          await prisma.productImage.create({ data: fixture });
+        }
+      }
+
+      const variantFixtures = [
+        {
+          name: "Стандарт",
+          priceDelta: "0.00",
           productId: product.id,
-          sortOrder: imageIndex,
-          width: 1200,
-        })),
+          sku: `${category.slug.toUpperCase()}-${globalIndex + 1}-S`,
+          sortOrder: 0,
+          stockQuantity: 6 + (globalIndex % 19),
+        },
+        {
+          name: "Большой",
+          priceDelta: "45.00",
+          productId: product.id,
+          sku: `${category.slug.toUpperCase()}-${globalIndex + 1}-L`,
+          sortOrder: 1,
+          stockQuantity: 3 + (globalIndex % 11),
+        },
+      ];
+      const existingVariants = await prisma.productVariant.findMany({
+        orderBy: { sortOrder: "asc" },
+        where: { productId: product.id },
       });
-      await prisma.productVariant.createMany({
-        data: [
-          {
-            name: "Стандарт",
-            productId: product.id,
-            reservedQuantity: 0,
-            sku: `${category.slug.toUpperCase()}-${globalIndex + 1}-S`,
-            sortOrder: 0,
-            stockQuantity: 6 + (globalIndex % 19),
-          },
-          {
-            name: "Большой",
-            priceDelta: "45.00",
-            productId: product.id,
-            reservedQuantity: 0,
-            sku: `${category.slug.toUpperCase()}-${globalIndex + 1}-L`,
-            sortOrder: 1,
-            stockQuantity: 3 + (globalIndex % 11),
-          },
-        ],
-      });
+      for (const [fixtureIndex, fixture] of variantFixtures.entries()) {
+        const existing = existingVariants[fixtureIndex];
+        if (existing) {
+          await prisma.productVariant.update({
+            data: {
+              deletedAt: null,
+              isActive: true,
+              name: fixture.name,
+              priceDelta: fixture.priceDelta,
+              productId: fixture.productId,
+              sku: fixture.sku,
+              sortOrder: fixture.sortOrder,
+            },
+            where: { id: existing.id },
+          });
+        } else {
+          await prisma.productVariant.create({
+            data: { ...fixture, reservedQuantity: 0 },
+          });
+        }
+      }
       globalIndex += 1;
     }
   }
