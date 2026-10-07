@@ -1,5 +1,5 @@
 import { getEnv } from "@nozi/config";
-import { prisma, UserRoleCode } from "@nozi/database";
+import { prisma, seedMarketplace, UserRoleCode } from "@nozi/database";
 
 import { hashPassword } from "./password";
 import { auth } from "./server";
@@ -112,6 +112,11 @@ async function main(): Promise<void> {
     }
 
     await seedDemoUsers(env.DEMO_USER_PASSWORD);
+    const sellerUser = await prisma.user.findUnique({
+      select: { id: true },
+      where: { email: "seller@nozi.local" },
+    });
+    await seedMarketplace(sellerUser?.id);
   }
 }
 

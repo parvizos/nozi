@@ -43,6 +43,7 @@ const nextConfig: NextConfig = {
     "@nozi/auth",
     "@nozi/config",
     "@nozi/database",
+    "@nozi/marketplace",
     "@nozi/observability",
   ],
   async headers() {

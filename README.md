@@ -1,6 +1,6 @@
 # NOZI
 
-NOZI is a production-minded gift marketplace MVP. The repository currently contains the Phase 1 foundation: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, health endpoints and structured logging.
+NOZI is a production-minded gift marketplace MVP. The repository currently contains the Phase 1 platform foundation and the Phase 2 customer marketplace: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, searchable catalog, store and product pages, customer favorites, health endpoints and structured logging.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the accepted design and delivery plan.
 
@@ -35,7 +35,9 @@ pnpm db:seed
 pnpm db:studio
 ```
 
-The seed always creates roles and admin permission definitions. Demo accounts are created only when `ALLOW_DEMO_SEED=true`. The seed refuses demo mode in production.
+The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories and 48 products. The seed refuses demo mode in production.
+
+Catalog money uses PostgreSQL `numeric(12,2)` and Prisma `Decimal`. The marketplace data-access layer serializes amounts as decimal strings; application code must not calculate money with JavaScript floating-point numbers.
 
 Development-only demo accounts:
 
@@ -67,7 +69,22 @@ apps/web                    Next.js UI and REST API
 packages/auth               Better Auth, Argon2id and RBAC policies
 packages/config             typed environment validation
 packages/database           Prisma schema, migrations and seed
+packages/marketplace        catalog queries, search, favorites and seller scope
 packages/observability      structured logging and request context
 ```
 
 The seller, admin and courier product interfaces are intentionally deferred to their implementation phases.
+
+## Customer routes
+
+| Route              | Purpose                                             |
+| ------------------ | --------------------------------------------------- |
+| `/`                | Database-backed marketplace home                    |
+| `/catalog`         | Paginated catalog with database filters and sorting |
+| `/category/[slug]` | Category landing and filtered products              |
+| `/store/[slug]`    | Store profile and product catalog                   |
+| `/product/[slug]`  | Product media, variants, availability and favorites |
+| `/search`          | PostgreSQL-backed product and store search          |
+| `/sign-in`         | Customer sign-in for protected actions              |
+
+Checkout, cart state and order creation are intentionally deferred to Phase 3. The product page communicates this and does not create browser-only cart state.

@@ -1,0 +1,3 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="Авторский букет">
+  <defs><linearGradient id="b" x2="1" y2="1"><stop stop-color="#f2eaf7"/><stop offset="1" stop-color="#d8c2e8"/></linearGradient></defs>
+  <rect width="800" height="800" rx="48" fill="url(#b)"/><g fill="#fff9f5"><circle cx="260" cy="280" r="96"/><circle cx="415" cy="220" r="115"/><circle cx="555" cy="320" r="100"/></g><g fill="#9b6caf"><circle cx="350" cy="360" r="115"/><circle cx="495" cy="420" r="104"/></g><path d="m260 390 145 330 145-330" fill="#738d68"/><path d="M325 665h160" stroke="#6f547c" stroke-width="24" stroke-linecap="round"/></svg>

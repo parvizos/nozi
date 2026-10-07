@@ -24,6 +24,34 @@ enum UserRoleCode {
   SUPER_ADMIN
 }
 
+enum SellerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum SellerUserRole {
+  OWNER
+  MANAGER
+  OPERATOR
+}
+
+enum StoreStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  SUSPENDED
+}
+
+enum ProductStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  HIDDEN
+  ARCHIVED
+}
+
 model User {
   id              String     @id @default(uuid()) @db.Uuid
   name            String     @map("display_name") @db.VarChar(160)
@@ -46,10 +74,267 @@ model User {
   adminPermissions      UserAdminPermission[] @relation("AdminPermissionSubjects")
   adminPermissionsGiven UserAdminPermission[] @relation("AdminPermissionGranters")
   auditLogs             AuditLog[]
+  approvedSellers       Seller[]              @relation("SellerApprover")
+  sellerMemberships     SellerUser[]
+  favorites             Favorite[]
+  moderatedProducts     Product[]             @relation("ProductModerator")
 
   @@index([status, createdAt(sort: Desc)])
   @@index([deletedAt])
   @@map("users")
+}
+
+model Country {
+  id                  String   @id @default(uuid()) @db.Uuid
+  isoCode             String   @unique @map("iso_code") @db.Char(2)
+  name                String   @db.VarChar(120)
+  defaultCurrencyCode String   @map("default_currency_code") @db.Char(3)
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  cities City[]
+
+  @@map("countries")
+}
+
+model City {
+  id           String   @id @default(uuid()) @db.Uuid
+  countryId    String   @map("country_id") @db.Uuid
+  name         String   @db.VarChar(120)
+  slug         String   @db.VarChar(140)
+  timezone     String   @db.VarChar(64)
+  currencyCode String   @map("currency_code") @db.Char(3)
+  locale       String   @default("ru-TJ") @db.VarChar(16)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  country        Country        @relation(fields: [countryId], references: [id], onDelete: Restrict)
+  stores         Store[]
+  storeAddresses StoreAddress[]
+
+  @@unique([countryId, slug])
+  @@index([isActive, name])
+  @@map("cities")
+}
+
+model Seller {
+  id                    String       @id @default(uuid()) @db.Uuid
+  legalName             String       @map("legal_name") @db.VarChar(200)
+  publicName            String       @map("public_name") @db.VarChar(160)
+  status                SellerStatus @default(PENDING)
+  supportEmail          String?      @map("support_email") @db.Citext
+  supportPhoneE164      String?      @map("support_phone_e164") @db.VarChar(20)
+  taxIdentifier         String?      @map("tax_identifier") @db.VarChar(80)
+  documentsStatus       String       @default("PENDING") @map("documents_status") @db.VarChar(32)
+  defaultCommissionRate Decimal      @default(15) @map("default_commission_rate") @db.Decimal(5, 2)
+  approvedAt            DateTime?    @map("approved_at") @db.Timestamptz(3)
+  approvedByUserId      String?      @map("approved_by_user_id") @db.Uuid
+  rejectionReason       String?      @map("rejection_reason") @db.VarChar(500)
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt             DateTime?    @map("deleted_at") @db.Timestamptz(3)
+
+  approvedBy User?        @relation("SellerApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  users      SellerUser[]
+  stores     Store[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([deletedAt])
+  @@map("sellers")
+}
+
+model SellerUser {
+  sellerId   String         @map("seller_id") @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  sellerRole SellerUserRole @default(OPERATOR) @map("seller_role")
+  isActive   Boolean        @default(true) @map("is_active")
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([sellerId, userId])
+  @@index([userId, isActive])
+  @@index([sellerId, isActive])
+  @@map("seller_users")
+}
+
+model Store {
+  id                        String      @id @default(uuid()) @db.Uuid
+  sellerId                  String      @map("seller_id") @db.Uuid
+  cityId                    String      @map("city_id") @db.Uuid
+  name                      String      @db.VarChar(160)
+  slug                      String      @db.VarChar(180)
+  description               String
+  logoObjectKey             String?     @map("logo_object_key") @db.VarChar(500)
+  coverImageObjectKey       String?     @map("cover_image_object_key") @db.VarChar(500)
+  phoneE164                 String      @map("phone_e164") @db.VarChar(20)
+  status                    StoreStatus @default(DRAFT)
+  minimumOrderAmount        Decimal     @default(0) @map("minimum_order_amount") @db.Decimal(12, 2)
+  defaultPreparationMinutes Int         @default(60) @map("default_preparation_minutes")
+  ratingAverage             Decimal     @default(0) @map("rating_average") @db.Decimal(3, 2)
+  ratingCount               Int         @default(0) @map("rating_count")
+  deliveryEnabled           Boolean     @default(true) @map("delivery_enabled")
+  isOpen                    Boolean     @default(true) @map("is_open")
+  isActive                  Boolean     @default(true) @map("is_active")
+  isTemporarilyPaused       Boolean     @default(false) @map("is_temporarily_paused")
+  pauseReason               String?     @map("pause_reason") @db.VarChar(300)
+  createdAt                 DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt                 DateTime?   @map("deleted_at") @db.Timestamptz(3)
+
+  seller   Seller        @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  city     City          @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  address  StoreAddress?
+  products Product[]
+
+  @@unique([cityId, slug])
+  @@index([sellerId, status])
+  @@index([cityId, status, isActive])
+  @@index([status, ratingAverage(sort: Desc)])
+  @@index([deletedAt])
+  @@map("stores")
+}
+
+model StoreAddress {
+  storeId    String   @id @map("store_id") @db.Uuid
+  cityId     String   @map("city_id") @db.Uuid
+  line1      String   @db.VarChar(240)
+  line2      String?  @db.VarChar(240)
+  postalCode String?  @map("postal_code") @db.VarChar(20)
+  latitude   Decimal? @db.Decimal(9, 6)
+  longitude  Decimal? @db.Decimal(9, 6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  city  City  @relation(fields: [cityId], references: [id], onDelete: Restrict)
+
+  @@index([cityId])
+  @@map("store_addresses")
+}
+
+model Category {
+  id             String    @id @default(uuid()) @db.Uuid
+  parentId       String?   @map("parent_id") @db.Uuid
+  name           String    @db.VarChar(120)
+  slug           String    @unique @db.VarChar(140)
+  description    String?
+  imageObjectKey String?   @map("image_object_key") @db.VarChar(500)
+  sortOrder      Int       @default(0) @map("sort_order")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@index([parentId, isActive, sortOrder])
+  @@index([isActive, sortOrder])
+  @@map("categories")
+}
+
+model Product {
+  id                     String        @id @default(uuid()) @db.Uuid
+  storeId                String        @map("store_id") @db.Uuid
+  categoryId             String        @map("category_id") @db.Uuid
+  name                   String        @db.VarChar(200)
+  slug                   String        @unique @db.VarChar(220)
+  description            String
+  status                 ProductStatus @default(DRAFT)
+  price                  Decimal       @db.Decimal(12, 2)
+  compareAtPrice         Decimal?      @map("compare_at_price") @db.Decimal(12, 2)
+  currencyCode           String        @map("currency_code") @db.Char(3)
+  trackInventory         Boolean       @default(true) @map("track_inventory")
+  stockQuantity          Int           @default(0) @map("stock_quantity")
+  preparationTimeMinutes Int?          @map("preparation_time_minutes")
+  ratingAverage          Decimal       @default(0) @map("rating_average") @db.Decimal(3, 2)
+  ratingCount            Int           @default(0) @map("rating_count")
+  isFeatured             Boolean       @default(false) @map("is_featured")
+  moderatedAt            DateTime?     @map("moderated_at") @db.Timestamptz(3)
+  moderatedByUserId      String?       @map("moderated_by_user_id") @db.Uuid
+  moderationNote         String?       @map("moderation_note") @db.VarChar(500)
+  version                Int           @default(1)
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt              DateTime?     @map("deleted_at") @db.Timestamptz(3)
+
+  store       Store            @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  category    Category         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  moderatedBy User?            @relation("ProductModerator", fields: [moderatedByUserId], references: [id], onDelete: SetNull)
+  images      ProductImage[]
+  variants    ProductVariant[]
+  favorites   Favorite[]
+
+  @@unique([storeId, slug])
+  @@index([categoryId, status, createdAt(sort: Desc)])
+  @@index([storeId, status])
+  @@index([status, ratingAverage(sort: Desc)])
+  @@index([status, isFeatured, createdAt(sort: Desc)])
+  @@index([price])
+  @@index([deletedAt])
+  @@map("products")
+}
+
+model ProductImage {
+  id        String    @id @default(uuid()) @db.Uuid
+  productId String    @map("product_id") @db.Uuid
+  objectKey String    @map("object_key") @db.VarChar(500)
+  altText   String    @map("alt_text") @db.VarChar(240)
+  sortOrder Int       @default(0) @map("sort_order")
+  isPrimary Boolean   @default(false) @map("is_primary")
+  width     Int?
+  height    Int?
+  mimeType  String?   @map("mime_type") @db.VarChar(100)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, sortOrder])
+  @@index([productId, isPrimary])
+  @@map("product_images")
+}
+
+model ProductVariant {
+  id               String    @id @default(uuid()) @db.Uuid
+  productId        String    @map("product_id") @db.Uuid
+  name             String    @db.VarChar(160)
+  sku              String?   @db.VarChar(100)
+  priceDelta       Decimal   @default(0) @map("price_delta") @db.Decimal(12, 2)
+  absolutePrice    Decimal?  @map("absolute_price") @db.Decimal(12, 2)
+  stockQuantity    Int       @default(0) @map("stock_quantity")
+  reservedQuantity Int       @default(0) @map("reserved_quantity")
+  isActive         Boolean   @default(true) @map("is_active")
+  sortOrder        Int       @default(0) @map("sort_order")
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, sku])
+  @@index([productId, isActive, sortOrder])
+  @@map("product_variants")
+}
+
+model Favorite {
+  customerUserId String   @map("customer_user_id") @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  customer User    @relation(fields: [customerUserId], references: [id], onDelete: Cascade)
+  product  Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([customerUserId, productId])
+  @@index([productId])
+  @@map("favorites")
 }
 
 model Session {

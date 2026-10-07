@@ -1,4 +1,12 @@
-export { Prisma, UserRoleCode, UserStatus } from "../generated/client/client";
+export {
+  Prisma,
+  ProductStatus,
+  SellerStatus,
+  SellerUserRole,
+  StoreStatus,
+  UserRoleCode,
+  UserStatus,
+} from "../generated/client/client";
 export type {
   Account,
   AdminPermission,
@@ -12,3 +20,4 @@ export type {
 } from "../generated/client/client";
 
 export { prisma } from "./client";
+export { seedMarketplace } from "./marketplace-seed";
