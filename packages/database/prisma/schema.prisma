@@ -1,0 +1,201 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/client"
+  moduleFormat = "esm"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+  DISABLED
+}
+
+enum UserRoleCode {
+  CUSTOMER
+  SELLER
+  COURIER
+  ADMIN
+  SUPER_ADMIN
+}
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  name            String     @map("display_name") @db.VarChar(160)
+  email           String     @unique @db.Citext
+  emailVerified   Boolean    @default(false) @map("email_verified")
+  image           String?    @map("image_url")
+  phoneE164       String?    @unique @map("phone_e164") @db.VarChar(20)
+  phoneVerifiedAt DateTime?  @map("phone_verified_at") @db.Timestamptz(3)
+  status          UserStatus @default(ACTIVE)
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(3)
+
+  accounts              Account[]
+  sessions              Session[]
+  roles                 UserRole[]            @relation("AssignedRoles")
+  rolesGranted          UserRole[]            @relation("GrantedRoles")
+  customerProfile       CustomerProfile?
+  adminPermissions      UserAdminPermission[] @relation("AdminPermissionSubjects")
+  adminPermissionsGiven UserAdminPermission[] @relation("AdminPermissionGranters")
+  auditLogs             AuditLog[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  token     String   @unique @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  ipAddress String?  @map("ip_address") @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(512)
+  userId    String   @map("user_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model Account {
+  id                    String    @id @default(uuid()) @db.Uuid
+  accountId             String    @map("account_id") @db.VarChar(255)
+  providerId            String    @map("provider_id") @db.VarChar(100)
+  userId                String    @map("user_id") @db.Uuid
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(3)
+  scope                 String?
+  password              String?   @map("password_hash")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("auth_accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid()) @db.Uuid
+  identifier String   @db.VarChar(320)
+  value      String
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@index([expiresAt])
+  @@map("auth_verifications")
+}
+
+model RateLimit {
+  id          String @id @default(uuid()) @db.Uuid
+  key         String @unique @db.VarChar(255)
+  count       Int
+  lastRequest BigInt @map("last_request")
+
+  @@map("auth_rate_limits")
+}
+
+model Role {
+  id          String       @id @default(uuid()) @db.Uuid
+  code        UserRoleCode @unique
+  description String?      @db.VarChar(255)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  users UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId          String   @map("user_id") @db.Uuid
+  roleId          String   @map("role_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+
+  user          User  @relation("AssignedRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role          Role  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  createdByUser User? @relation("GrantedRoles", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model CustomerProfile {
+  userId             String    @id @map("user_id") @db.Uuid
+  firstName          String?   @map("first_name") @db.VarChar(80)
+  lastName           String?   @map("last_name") @db.VarChar(80)
+  locale             String    @default("ru") @db.VarChar(10)
+  marketingConsentAt DateTime? @map("marketing_consent_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("customer_profiles")
+}
+
+model AdminPermission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(100)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  users UserAdminPermission[]
+
+  @@map("admin_permissions")
+}
+
+model UserAdminPermission {
+  userId          String   @map("user_id") @db.Uuid
+  permissionId    String   @map("permission_id") @db.Uuid
+  grantedByUserId String?  @map("granted_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User            @relation("AdminPermissionSubjects", fields: [userId], references: [id], onDelete: Cascade)
+  permission AdminPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedBy  User?           @relation("AdminPermissionGranters", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  @@id([userId, permissionId])
+  @@index([permissionId])
+  @@map("user_admin_permissions")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  actorRole      String?  @map("actor_role") @db.VarChar(50)
+  action         String   @db.VarChar(100)
+  subjectType    String   @map("subject_type") @db.VarChar(100)
+  subjectId      String   @map("subject_id") @db.VarChar(100)
+  requestId      String?  @map("request_id") @db.VarChar(100)
+  ipHash         String?  @map("ip_hash") @db.VarChar(128)
+  reason         String?  @db.VarChar(500)
+  beforeRedacted Json?    @map("before_redacted")
+  afterRedacted  Json?    @map("after_redacted")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([subjectType, subjectId, createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

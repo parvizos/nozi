@@ -1,0 +1,30 @@
+# dependencies
+node_modules/
+.pnpm-store/
+.pnpm-home/
+.xdg/
+
+# builds and caches
+.next/
+out/
+dist/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# local environment files
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+pnpm-debug.log*
+
+# editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+
+# generated Prisma client artifacts
+packages/database/generated/

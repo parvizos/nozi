@@ -1,0 +1,38 @@
+{
+  "name": "nozi",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --filter=@nozi/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "db:generate": "pnpm --filter @nozi/database db:generate",
+    "db:migrate": "pnpm --filter @nozi/database db:migrate",
+    "db:migrate:deploy": "pnpm --filter @nozi/database db:migrate:deploy",
+    "db:seed": "pnpm --filter @nozi/auth db:seed",
+    "db:studio": "pnpm --filter @nozi/database db:studio"
+  },
+  "devDependencies": {
+    "@next/eslint-plugin-next": "16.4.0",
+    "@types/node": "24.10.1",
+    "@vitest/coverage-v8": "4.0.18",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.4.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.8.2",
+    "prettier-plugin-tailwindcss": "0.7.2",
+    "turbo": "2.8.20",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

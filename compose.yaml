@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: nozi
+      POSTGRES_USER: nozi
+      POSTGRES_PASSWORD: nozi_dev_only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nozi -d nozi"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - nozi_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  nozi_postgres_data:

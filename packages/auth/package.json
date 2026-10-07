@@ -1,0 +1,26 @@
+{
+  "name": "@nozi/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./password": "./src/password.ts",
+    "./rbac": "./src/rbac.ts",
+    "./server": "./src/server.ts"
+  },
+  "scripts": {
+    "db:seed": "tsx src/seed.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@node-rs/argon2": "2.2.2",
+    "@nozi/config": "workspace:*",
+    "@nozi/database": "workspace:*",
+    "better-auth": "1.7.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.21.0"
+  }
+}

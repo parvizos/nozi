@@ -1,0 +1,10 @@
+.next
+.turbo
+coverage
+dist
+node_modules
+pnpm-lock.yaml
+packages/database/generated
+ARCHITECTURE.md
+DATABASE_SCHEMA.md
+IMPLEMENTATION_PLAN.md
