@@ -6,12 +6,14 @@ export type MarketplaceErrorCode =
   | "IDEMPOTENCY_CONFLICT"
   | "INSUFFICIENT_STOCK"
   | "INVALID_ORDER_TRANSITION"
+  | "PRODUCT_SLUG_CONFLICT"
   | "ORDER_NOT_FOUND"
   | "PRODUCT_UNAVAILABLE"
   | "STORE_UNAVAILABLE"
   | "VALIDATION_ERROR"
   | "VARIANT_REQUIRED"
-  | "VARIANT_UNAVAILABLE";
+  | "VARIANT_UNAVAILABLE"
+  | "VERSION_CONFLICT";
 
 export class MarketplaceError extends Error {
   readonly code: MarketplaceErrorCode;

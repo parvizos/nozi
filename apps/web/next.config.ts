@@ -36,6 +36,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  experimental: { authInterrupts: true },
   output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,

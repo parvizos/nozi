@@ -31,6 +31,21 @@ const demoUsers: Array<{ email: string; name: string; roles: UserRoleCode[] }> =
       roles: [UserRoleCode.SELLER],
     },
     {
+      email: "seller.manager@nozi.local",
+      name: "Safina Manager",
+      roles: [UserRoleCode.SELLER],
+    },
+    {
+      email: "seller.operator@nozi.local",
+      name: "Safina Operator",
+      roles: [UserRoleCode.SELLER],
+    },
+    {
+      email: "seller.atlas@nozi.local",
+      name: "Atlas Owner",
+      roles: [UserRoleCode.SELLER],
+    },
+    {
       email: "courier@nozi.local",
       name: "Demo Courier",
       roles: [UserRoleCode.COURIER],
@@ -112,11 +127,29 @@ async function main(): Promise<void> {
     }
 
     await seedDemoUsers(env.DEMO_USER_PASSWORD);
-    const sellerUser = await prisma.user.findUnique({
-      select: { id: true },
-      where: { email: "seller@nozi.local" },
+    const seededUsers = await prisma.user.findMany({
+      select: { email: true, id: true },
+      where: {
+        email: {
+          in: [
+            "seller@nozi.local",
+            "seller.manager@nozi.local",
+            "seller.operator@nozi.local",
+            "seller.atlas@nozi.local",
+            "customer@nozi.local",
+          ],
+        },
+      },
     });
-    await seedMarketplace(sellerUser?.id);
+    const userId = (email: string) =>
+      seededUsers.find((user) => user.email === email)?.id;
+    await seedMarketplace({
+      atlasOwnerId: userId("seller.atlas@nozi.local"),
+      customerId: userId("customer@nozi.local"),
+      managerId: userId("seller.manager@nozi.local"),
+      operatorId: userId("seller.operator@nozi.local"),
+      ownerId: userId("seller@nozi.local"),
+    });
   }
 }
 

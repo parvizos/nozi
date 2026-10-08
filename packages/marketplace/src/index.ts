@@ -21,7 +21,37 @@ export type { ProductSearchProvider } from "./search";
 export {
   assertSellerStoreAccess,
   getAccessibleStoreIds,
+  getSellerMemberships,
+  requireSellerWorkspace,
+  SellerPermission,
 } from "./seller-access";
+export type {
+  SellerMembershipScope,
+  SellerPermissionCode,
+} from "./seller-access";
+export {
+  rejectionReasonSchema,
+  sellerOrderActionSchema,
+  sellerOrderFilterSchema,
+  sellerProductFilterSchema,
+  sellerProductInputSchema,
+  sellerStoreUpdateSchema,
+} from "./seller-contracts";
+export {
+  archiveSellerProduct,
+  createSellerProduct,
+  getSellerDashboard,
+  getSellerOrder,
+  getSellerProduct,
+  getSellerShell,
+  getSellerStore,
+  listSellerOrders,
+  listSellerProductCategories,
+  listSellerProducts,
+  sellerTransitionOrder,
+  updateSellerProduct,
+  updateSellerStore,
+} from "./seller";
 export { addCartItemSchema, updateCartItemSchema } from "./cart-contracts";
 export type { AddCartItemInput, UpdateCartItemInput } from "./cart-contracts";
 export {
@@ -55,6 +85,8 @@ export {
   getPaymentProvider,
   TestPaymentProvider,
 } from "./payments";
+export { DevelopmentObjectStorageProvider } from "./storage";
+export type { ObjectMetadata, ObjectStorageProvider } from "./storage";
 export type {
   PaymentIntentInput,
   PaymentIntentResult,

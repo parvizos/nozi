@@ -31,3 +31,4 @@ export type {
 
 export { prisma } from "./client";
 export { seedMarketplace } from "./marketplace-seed";
+export type { MarketplaceSeedUsers } from "./marketplace-seed";

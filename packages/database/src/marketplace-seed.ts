@@ -1,4 +1,11 @@
 import {
+  InventoryReservationStatus,
+  OrderActorType,
+  OrderStatus,
+  OrderStatusSource,
+  PaymentMethod,
+  PaymentProviderCode,
+  PaymentStatus,
   ProductStatus,
   SellerStatus,
   SellerUserRole,
@@ -209,7 +216,17 @@ function productSlug(
   }`;
 }
 
-export async function seedMarketplace(sellerUserId?: string): Promise<void> {
+export type MarketplaceSeedUsers = {
+  atlasOwnerId?: string | undefined;
+  customerId?: string | undefined;
+  managerId?: string | undefined;
+  operatorId?: string | undefined;
+  ownerId?: string | undefined;
+};
+
+export async function seedMarketplace(
+  users: MarketplaceSeedUsers = {},
+): Promise<void> {
   const country = await prisma.country.upsert({
     create: {
       defaultCurrencyCode: "TJS",
@@ -267,17 +284,22 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
       where: { id: fixture.id },
     });
 
-    if (sellerUserId && index === 0) {
+    const memberships =
+      index === 0
+        ? ([
+            [users.ownerId, SellerUserRole.OWNER],
+            [users.managerId, SellerUserRole.MANAGER],
+            [users.operatorId, SellerUserRole.OPERATOR],
+          ] as const)
+        : index === 1
+          ? ([[users.atlasOwnerId, SellerUserRole.OWNER]] as const)
+          : [];
+    for (const [userId, sellerRole] of memberships) {
+      if (!userId) continue;
       await prisma.sellerUser.upsert({
-        create: {
-          sellerId: seller.id,
-          sellerRole: SellerUserRole.OWNER,
-          userId: sellerUserId,
-        },
-        update: { isActive: true, sellerRole: SellerUserRole.OWNER },
-        where: {
-          sellerId_userId: { sellerId: seller.id, userId: sellerUserId },
-        },
+        create: { sellerId: seller.id, sellerRole, userId },
+        update: { isActive: true, sellerRole },
+        where: { sellerId_userId: { sellerId: seller.id, userId } },
       });
     }
 
@@ -330,6 +352,19 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
       },
       where: { storeId: store.id },
     });
+    for (let dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek += 1) {
+      await prisma.storeOpeningHour.upsert({
+        create: {
+          closesAt: dayOfWeek === 7 ? "18:00" : "20:00",
+          dayOfWeek,
+          isClosed: false,
+          opensAt: dayOfWeek === 7 ? "10:00" : "09:00",
+          storeId: store.id,
+        },
+        update: {},
+        where: { storeId_dayOfWeek: { dayOfWeek, storeId: store.id } },
+      });
+    }
     stores.push({ id: store.id, slug: store.slug });
   }
 
@@ -445,6 +480,167 @@ export async function seedMarketplace(sellerUserId?: string): Promise<void> {
         }
       }
       globalIndex += 1;
+    }
+  }
+
+  if (users.customerId) {
+    const demoStatuses = [
+      OrderStatus.AWAITING_SELLER_CONFIRMATION,
+      OrderStatus.CONFIRMED,
+      OrderStatus.PREPARING,
+      OrderStatus.READY_FOR_PICKUP,
+    ];
+    for (const [index, status] of demoStatuses.entries()) {
+      const store = stores[index % 2];
+      if (!store) continue;
+      const product = await prisma.product.findFirstOrThrow({
+        include: { variants: { where: { isActive: true }, take: 1 } },
+        orderBy: { createdAt: "asc" },
+        where: { storeId: store.id, status: ProductStatus.ACTIVE },
+      });
+      const variant = product.variants[0];
+      const unitPrice =
+        variant?.absolutePrice ?? product.price.add(variant?.priceDelta ?? 0);
+      const orderId = `70000000-0000-4000-8000-00000000000${index + 1}`;
+      const orderNumber = `NZ-DEMO-${String(index + 1).padStart(4, "0")}`;
+      const amount = unitPrice.add(25);
+      await prisma.order.upsert({
+        create: {
+          buyerName: "Фируз Нозимов",
+          buyerPhoneE164: "+992900009900",
+          cityId: city.id,
+          currencyCode: "TJS",
+          customerUserId: users.customerId,
+          deliveryFee: "25.00",
+          giftMessage:
+            index % 2 ? "С теплом и самыми добрыми пожеланиями!" : null,
+          grandTotal: amount,
+          id: orderId,
+          itemsSubtotal: unitPrice,
+          orderNumber,
+          paymentMethod: PaymentMethod.CASH,
+          placedAt: new Date(`2026-10-08T0${index + 4}:00:00.000Z`),
+          recipientName:
+            ["Мадина", "Далер", "Ситора", "Камол"][index] ?? "Получатель",
+          recipientPhoneE164: `+99290000880${index}`,
+          requestedDeliveryDate: new Date("2026-10-09T00:00:00.000Z"),
+          requestedDeliveryWindowEnd: new Date("1970-01-01T13:00:00.000Z"),
+          requestedDeliveryWindowStart: new Date("1970-01-01T11:00:00.000Z"),
+          status,
+          storeId: store.id,
+          version: index + 2,
+        },
+        update: { status, version: index + 2 },
+        where: { id: orderId },
+      });
+      await prisma.orderDeliveryAddress.upsert({
+        create: {
+          cityName: "Душанбе",
+          countryCode: "TJ",
+          line1: `проспект Рудаки, ${100 + index}`,
+          orderId,
+        },
+        update: { line1: `проспект Рудаки, ${100 + index}` },
+        where: { orderId },
+      });
+      await prisma.orderItem.deleteMany({ where: { orderId } });
+      await prisma.orderItem.create({
+        data: {
+          currencyCode: "TJS",
+          imageObjectKey: `/images/products/${categoryFixtures[index]?.slug ?? "gifts"}.svg`,
+          lineTotal: unitPrice,
+          orderId,
+          productId: product.id,
+          productName: product.name,
+          productVariantId: variant?.id ?? null,
+          quantity: 1,
+          sku: variant?.sku ?? null,
+          unitPrice,
+          variantName: variant?.name ?? null,
+        },
+      });
+      await prisma.orderStatusHistory.deleteMany({ where: { orderId } });
+      const progression = [
+        OrderStatus.CREATED,
+        OrderStatus.AWAITING_SELLER_CONFIRMATION,
+        OrderStatus.CONFIRMED,
+        OrderStatus.PREPARING,
+        OrderStatus.READY_FOR_PICKUP,
+      ];
+      const end = progression.indexOf(status);
+      for (let step = 0; step <= end; step += 1) {
+        const newStatus = progression[step];
+        if (!newStatus) continue;
+        await prisma.orderStatusHistory.create({
+          data: {
+            actorType:
+              step <= 1 ? OrderActorType.SYSTEM : OrderActorType.SELLER,
+            newStatus,
+            orderId,
+            previousStatus: step === 0 ? null : (progression[step - 1] ?? null),
+            source: OrderStatusSource.SYSTEM,
+          },
+        });
+      }
+      await prisma.inventoryReservation.upsert({
+        create: {
+          id: `71000000-0000-4000-8000-00000000000${index + 1}`,
+          orderId,
+          productId: product.id,
+          productVariantId: variant?.id ?? null,
+          quantity: 1,
+          status: InventoryReservationStatus.ACTIVE,
+        },
+        update: {
+          productId: product.id,
+          productVariantId: variant?.id ?? null,
+          status: InventoryReservationStatus.ACTIVE,
+        },
+        where: { id: `71000000-0000-4000-8000-00000000000${index + 1}` },
+      });
+      await prisma.payment.upsert({
+        create: {
+          amount,
+          currencyCode: "TJS",
+          idempotencyKey: `seed-${orderNumber}`,
+          method: PaymentMethod.CASH,
+          orderId,
+          provider: PaymentProviderCode.CASH,
+          status: PaymentStatus.PENDING,
+        },
+        update: { status: PaymentStatus.PENDING },
+        where: { orderId },
+      });
+    }
+    const products = await prisma.product.findMany({ select: { id: true } });
+    for (const product of products) {
+      const reserved = await prisma.inventoryReservation.aggregate({
+        _sum: { quantity: true },
+        where: {
+          productId: product.id,
+          status: InventoryReservationStatus.ACTIVE,
+        },
+      });
+      await prisma.product.update({
+        data: { reservedQuantity: reserved._sum.quantity ?? 0 },
+        where: { id: product.id },
+      });
+    }
+    const variants = await prisma.productVariant.findMany({
+      select: { id: true },
+    });
+    for (const variant of variants) {
+      const reserved = await prisma.inventoryReservation.aggregate({
+        _sum: { quantity: true },
+        where: {
+          productVariantId: variant.id,
+          status: InventoryReservationStatus.ACTIVE,
+        },
+      });
+      await prisma.productVariant.update({
+        data: { reservedQuantity: reserved._sum.quantity ?? 0 },
+        where: { id: variant.id },
+      });
     }
   }
 }

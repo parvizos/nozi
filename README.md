@@ -1,6 +1,6 @@
 # NOZI
 
-NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, and Phase 3 purchase foundation: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, searchable catalog, server-side cart, transactional checkout, order history, health endpoints and structured logging.
+NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, transactional purchase flow, and Phase 4 seller workspace: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, searchable catalog, server-side cart, checkout, seller order operations, product and stock management, store settings, audit logs, health endpoints and structured logging.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the accepted design and delivery plan.
 
@@ -35,7 +35,7 @@ pnpm db:seed
 pnpm db:studio
 ```
 
-The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories and 48 products. The seed refuses demo mode in production.
+The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories, 48 products, seller memberships and orders in the incoming, confirmed, preparing and ready states. The seed refuses demo mode in production.
 
 Money uses PostgreSQL `numeric(12,2)` and Prisma `Decimal`. The marketplace data-access layer serializes amounts as decimal strings; application code must not calculate money with JavaScript floating-point numbers.
 
@@ -43,12 +43,15 @@ Each customer has at most one active cart, and every cart belongs to one store. 
 
 Development-only demo accounts:
 
-| Role     | Email                 |
-| -------- | --------------------- |
-| Admin    | `admin@nozi.local`    |
-| Seller   | `seller@nozi.local`   |
-| Courier  | `courier@nozi.local`  |
-| Customer | `customer@nozi.local` |
+| Role                | Email                        |
+| ------------------- | ---------------------------- |
+| Admin               | `admin@nozi.local`           |
+| Seller owner        | `seller@nozi.local`          |
+| Seller manager      | `seller.manager@nozi.local`  |
+| Seller operator     | `seller.operator@nozi.local` |
+| Second seller owner | `seller.atlas@nozi.local`    |
+| Courier             | `courier@nozi.local`         |
+| Customer            | `customer@nozi.local`        |
 
 All demo accounts use the local value of `DEMO_USER_PASSWORD`; no password is stored in this repository.
 
@@ -71,11 +74,26 @@ apps/web                    Next.js UI and REST API
 packages/auth               Better Auth, Argon2id and RBAC policies
 packages/config             typed environment validation
 packages/database           Prisma schema, migrations and seed
-packages/marketplace        catalog, cart, checkout, orders and state machine
+packages/marketplace        catalog, cart, checkout, orders, seller services and state machine
 packages/observability      structured logging and request context
 ```
 
-The seller, admin and courier product interfaces are intentionally deferred to their implementation phases.
+The admin and courier interfaces are intentionally deferred to their implementation phases.
+
+## Seller routes
+
+| Route                          | Purpose                                      |
+| ------------------------------ | -------------------------------------------- |
+| `/seller`                      | Operational metrics and recent orders        |
+| `/seller/orders`               | Scoped, filtered and paginated order queue   |
+| `/seller/orders/[orderNumber]` | Fulfilment details, timeline and actions     |
+| `/seller/products`             | Products, physical stock and reservations    |
+| `/seller/products/new`         | Create a product and variants                |
+| `/seller/products/[productId]` | Edit, activate or deactivate a product       |
+| `/seller/store`                | Public profile, schedule and store operation |
+| `/seller/settings`             | Redirect to store settings                   |
+
+Seller entity permissions are enforced on the server. Owners and managers can manage orders, products and store settings; operators can only view and process orders.
 
 ## Customer routes
 
@@ -105,4 +123,4 @@ The seller, admin and courier product interfaces are intentionally deferred to t
 | `DELETE` | `/api/v1/cart/items/[itemId]` | Remove an item                |
 | `POST`   | `/api/v1/checkout/orders`     | Create an idempotent order    |
 
-The checkout endpoint accepts `CASH` and development `TEST` payment methods through the payment provider interface. It never receives or stores card data. Seller, admin and courier workflows remain deferred to their implementation phases.
+The checkout endpoint accepts `CASH` and development `TEST` payment methods through the payment provider interface. It never receives or stores card data. Seller rejection releases active inventory reservations once and cancels cash payments or refunds development test payments. Admin and courier workflows remain deferred to their implementation phases.

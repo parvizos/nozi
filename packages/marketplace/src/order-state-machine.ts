@@ -4,6 +4,8 @@ import {
   OrderActorType,
   OrderStatus,
   OrderStatusSource,
+  PaymentMethod,
+  PaymentStatus,
   Prisma,
   UserRoleCode,
   prisma,
@@ -18,10 +20,12 @@ type TransitionPrincipal = {
 };
 
 export type TransitionOrderInput = {
-  expectedVersion?: number;
+  cancellationReasonCode?: string | undefined;
+  expectedVersion?: number | undefined;
   newStatus: OrderStatus;
-  note?: string;
+  note?: string | undefined;
   orderId: string;
+  requestId?: string | undefined;
   source?: OrderStatusSource;
 };
 
@@ -90,7 +94,11 @@ async function assertTransitionPermission(
     const membership = await tx.sellerUser.count({
       where: {
         isActive: true,
-        seller: { stores: { some: { id: order.storeId } } },
+        seller: {
+          deletedAt: null,
+          status: "APPROVED",
+          stores: { some: { deletedAt: null, id: order.storeId } },
+        },
         userId: principal.userId,
       },
     });
@@ -222,7 +230,11 @@ export async function transitionOrderInTransaction(
         ? { deliveredAt: now }
         : {}),
       ...(input.newStatus === OrderStatus.CANCELLED
-        ? { cancelledAt: now }
+        ? {
+            cancellationNote: input.note ?? null,
+            cancellationReasonCode: input.cancellationReasonCode ?? null,
+            cancelledAt: now,
+          }
         : {}),
       status: input.newStatus,
       version: { increment: 1 },
@@ -238,6 +250,25 @@ export async function transitionOrderInTransaction(
   }
   if (input.newStatus === OrderStatus.CANCELLED) {
     await releaseReservations(tx, order.id);
+    const payment = await tx.payment.findUnique({
+      where: { orderId: order.id },
+    });
+    if (
+      payment &&
+      payment.status !== PaymentStatus.CANCELLED &&
+      payment.status !== PaymentStatus.REFUNDED
+    ) {
+      const refund =
+        payment.method === PaymentMethod.TEST &&
+        (payment.status === PaymentStatus.AUTHORIZED ||
+          payment.status === PaymentStatus.PAID);
+      await tx.payment.update({
+        data: refund
+          ? { refundedAt: now, status: PaymentStatus.REFUNDED }
+          : { cancelledAt: now, status: PaymentStatus.CANCELLED },
+        where: { id: payment.id },
+      });
+    }
   } else if (input.newStatus === OrderStatus.DELIVERED) {
     await consumeReservations(tx, order.id);
   }
@@ -252,6 +283,21 @@ export async function transitionOrderInTransaction(
       source: input.source ?? OrderStatusSource.API,
     },
   });
+  if (principal.userId) {
+    await tx.auditLog.create({
+      data: {
+        action: "order.status_changed",
+        actorRole: principal.actorType,
+        actorUserId: principal.userId,
+        afterRedacted: { status: input.newStatus },
+        beforeRedacted: { status: order.status },
+        reason: input.cancellationReasonCode ?? input.note ?? null,
+        requestId: input.requestId ?? null,
+        subjectId: order.id,
+        subjectType: "Order",
+      },
+    });
+  }
   return tx.order.findUniqueOrThrow({ where: { id: order.id } });
 }
 

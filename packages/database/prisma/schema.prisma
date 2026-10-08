@@ -273,6 +273,7 @@ model Store {
   products Product[]
   carts    Cart[]
   orders   Order[]
+  openingHours StoreOpeningHour[]
 
   @@unique([cityId, slug])
   @@index([sellerId, status])
@@ -280,6 +281,23 @@ model Store {
   @@index([status, ratingAverage(sort: Desc)])
   @@index([deletedAt])
   @@map("stores")
+}
+
+model StoreOpeningHour {
+  id        String   @id @default(uuid()) @db.Uuid
+  storeId   String   @map("store_id") @db.Uuid
+  dayOfWeek Int      @map("day_of_week") @db.SmallInt
+  isClosed  Boolean  @default(false) @map("is_closed")
+  opensAt   String?  @map("opens_at") @db.VarChar(5)
+  closesAt  String?  @map("closes_at") @db.VarChar(5)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, dayOfWeek])
+  @@index([storeId])
+  @@map("store_opening_hours")
 }
 
 model StoreAddress {
@@ -614,6 +632,8 @@ model Payment {
   failureMessageSafe String?             @map("failure_message_safe") @db.VarChar(300)
   authorizedAt       DateTime?           @map("authorized_at") @db.Timestamptz(3)
   paidAt             DateTime?           @map("paid_at") @db.Timestamptz(3)
+  cancelledAt        DateTime?           @map("cancelled_at") @db.Timestamptz(3)
+  refundedAt         DateTime?           @map("refunded_at") @db.Timestamptz(3)
   createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
 
