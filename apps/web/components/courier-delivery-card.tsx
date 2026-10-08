@@ -6,8 +6,10 @@ const statusLabels: Record<string, string> = {
   ASSIGNED: "Новое назначение",
   CANCELLED: "Отменено",
   DELIVERED: "Доставлено",
+  DELIVERY_FAILED: "Не доставлено",
   ON_THE_WAY: "В пути",
   PICKED_UP: "Заказ получен",
+  RETURNING_TO_STORE: "Возврат в магазин",
 };
 
 export function CourierDeliveryCard({

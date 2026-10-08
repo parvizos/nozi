@@ -48,7 +48,18 @@ const nextConfig: NextConfig = {
     "@nozi/observability",
   ],
   async headers() {
-    return [{ source: "/(.*)", headers: securityHeaders }];
+    return [
+      { source: "/(.*)", headers: securityHeaders },
+      {
+        source: "/courier/:path*",
+        headers: [
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=(self)",
+          },
+        ],
+      },
+    ];
   },
 };
 

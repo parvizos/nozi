@@ -1,4 +1,10 @@
-import { assertPermission, Permission, type ActorContext } from "@nozi/auth";
+import {
+  assertPermission,
+  Permission,
+  setUserStatus,
+  type ActorContext,
+} from "@nozi/auth";
+import { getEnv } from "@nozi/config";
 import {
   CourierAssignmentStatus,
   CourierStatus,
@@ -21,16 +27,21 @@ import type {
   auditFilterSchema,
   categoryCreateSchema,
   categoryUpdateSchema,
+  cashSettlementSchema,
   courierCreateSchema,
   courierUpdateSchema,
   financeRangeSchema,
+  failedDeliveryRetrySchema,
   productModerationSchema,
   sellerAdminUpdateSchema,
   storeAdminUpdateSchema,
 } from "./admin-contracts";
 import { MarketplaceError } from "./errors";
+import { createCourierInvitationInTransaction } from "./courier-activation";
 import { transitionOrderInTransaction } from "./order-state-machine";
 import { consumeAdminMutationRateLimit } from "./rate-limit";
+import { validateDeliverySlot } from "./delivery-slots";
+import { postCourierCashSettlementLedger } from "./ledger";
 import type { z } from "zod";
 
 type PageInput = z.infer<typeof adminPageSchema>;
@@ -43,6 +54,8 @@ const activeAssignmentStatuses = [
   CourierAssignmentStatus.ARRIVED_AT_STORE,
   CourierAssignmentStatus.PICKED_UP,
   CourierAssignmentStatus.ON_THE_WAY,
+  CourierAssignmentStatus.DELIVERY_FAILED,
+  CourierAssignmentStatus.RETURNING_TO_STORE,
 ];
 
 function assertAdmin(
@@ -94,6 +107,7 @@ async function audit(
 function principal(actor: ActorContext) {
   return {
     actorType: OrderActorType.ADMIN,
+    permissions: actor.permissions,
     roles: actor.roles,
     userId: actor.userId,
   };
@@ -673,6 +687,193 @@ export async function assignCourier(
   }
 }
 
+export async function retryFailedDelivery(
+  actor: ActorContext,
+  orderNumber: string,
+  input: z.infer<typeof failedDeliveryRetrySchema>,
+  requestId?: string,
+) {
+  assertAdmin(actor, Permission.CouriersManage);
+  assertAdmin(actor, Permission.OrdersManage);
+  return prisma.$transaction(
+    async (tx) => {
+      const order = await tx.order.findUnique({
+        include: {
+          courierAssignments: {
+            orderBy: { assignedAt: "desc" },
+            take: 1,
+            where: { status: CourierAssignmentStatus.DELIVERY_FAILED },
+          },
+          store: { include: { city: true, openingHours: true } },
+        },
+        where: { orderNumber },
+      });
+      if (
+        !order ||
+        order.status !== OrderStatus.DELIVERY_FAILED ||
+        !order.courierAssignments[0]
+      )
+        throw new MarketplaceError(
+          "FAILED_DELIVERY_CONFLICT",
+          "Заказ не ожидает восстановления доставки",
+          409,
+        );
+      validateDeliverySlot({
+        date: input.deliveryDate,
+        preparationMinutes: 0,
+        store: {
+          defaultPreparationMinutes: order.store.defaultPreparationMinutes,
+          isActive: order.store.isActive,
+          isOpen: order.store.isOpen,
+          isTemporarilyPaused: order.store.isTemporarilyPaused,
+          openingHours: order.store.openingHours,
+          timezone: order.store.city.timezone,
+        },
+        windowEnd: input.deliveryWindowEnd,
+        windowStart: input.deliveryWindowStart,
+      });
+      const previous = order.courierAssignments[0];
+      const selected = await tx.courier.findUnique({
+        where: { id: input.courierId },
+      });
+      const sameCourier = selected?.id === previous.courierId;
+      if (
+        !selected ||
+        !selected.isActive ||
+        selected.status === CourierStatus.SUSPENDED ||
+        (!sameCourier && selected.status !== CourierStatus.AVAILABLE)
+      )
+        throw new MarketplaceError(
+          "COURIER_UNAVAILABLE",
+          "Курьер недоступен",
+          409,
+        );
+      const now = new Date();
+      const cancelled = await tx.courierAssignment.updateMany({
+        data: {
+          cancelledAt: now,
+          requiresAdminAttention: false,
+          status: CourierAssignmentStatus.CANCELLED,
+        },
+        where: {
+          id: previous.id,
+          status: CourierAssignmentStatus.DELIVERY_FAILED,
+        },
+      });
+      if (cancelled.count !== 1)
+        throw new MarketplaceError(
+          "FAILED_DELIVERY_CONFLICT",
+          "Восстановление уже выполнено",
+          409,
+        );
+      await tx.courier.update({
+        data: { status: CourierStatus.AVAILABLE },
+        where: { id: previous.courierId },
+      });
+      await transitionOrderInTransaction(tx, principal(actor), {
+        expectedVersion: order.version,
+        newStatus: OrderStatus.RESCHEDULED,
+        note: "Delivery retry scheduled",
+        orderId: order.id,
+        requestId,
+      });
+      const rescheduled = await tx.order.update({
+        data: {
+          requestedDeliveryDate: new Date(`${input.deliveryDate}T00:00:00Z`),
+          requestedDeliveryWindowEnd: new Date(
+            `1970-01-01T${input.deliveryWindowEnd}:00Z`,
+          ),
+          requestedDeliveryWindowStart: new Date(
+            `1970-01-01T${input.deliveryWindowStart}:00Z`,
+          ),
+        },
+        where: { id: order.id },
+      });
+      await transitionOrderInTransaction(tx, principal(actor), {
+        expectedVersion: rescheduled.version,
+        newStatus: OrderStatus.COURIER_ASSIGNED,
+        note: "Courier assigned for retry",
+        orderId: order.id,
+        requestId,
+      });
+      const assignment = await tx.courierAssignment.create({
+        data: {
+          assignedByAdminUserId: actor.userId,
+          courierId: selected.id,
+          orderId: order.id,
+        },
+      });
+      await tx.courier.update({
+        data: { status: CourierStatus.BUSY },
+        where: { id: selected.id },
+      });
+      await tx.deliveryFailure.updateMany({
+        data: { resolvedAt: now },
+        where: { assignmentId: previous.id, resolvedAt: null },
+      });
+      await audit(tx, actor, {
+        action: "delivery.retry_scheduled",
+        after: { courierId: selected.id, status: assignment.status },
+        before: { courierId: previous.courierId, status: previous.status },
+        requestId,
+        subjectId: order.id,
+        subjectType: "Order",
+      });
+      return assignment;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+}
+
+export async function startFailedDeliveryReturn(
+  actor: ActorContext,
+  orderNumber: string,
+  requestId?: string,
+) {
+  assertAdmin(actor, Permission.OrdersManage);
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { orderNumber } });
+    if (!order || order.status !== OrderStatus.DELIVERY_FAILED)
+      throw new MarketplaceError(
+        "FAILED_DELIVERY_CONFLICT",
+        "Заказ не ожидает возврата",
+        409,
+      );
+    const assignment = await tx.courierAssignment.findFirst({
+      where: {
+        orderId: order.id,
+        status: CourierAssignmentStatus.DELIVERY_FAILED,
+      },
+    });
+    if (!assignment)
+      throw new MarketplaceError(
+        "FAILED_DELIVERY_CONFLICT",
+        "Активное назначение не найдено",
+        409,
+      );
+    const changed = await tx.courierAssignment.updateMany({
+      data: { status: CourierAssignmentStatus.RETURNING_TO_STORE },
+      where: {
+        id: assignment.id,
+        status: CourierAssignmentStatus.DELIVERY_FAILED,
+      },
+    });
+    if (changed.count !== 1)
+      throw new MarketplaceError(
+        "FAILED_DELIVERY_CONFLICT",
+        "Возврат уже начат",
+        409,
+      );
+    return transitionOrderInTransaction(tx, principal(actor), {
+      expectedVersion: order.version,
+      newStatus: OrderStatus.RETURNING_TO_STORE,
+      note: "Return to store requested by operations",
+      orderId: order.id,
+      requestId,
+    });
+  });
+}
+
 export async function addAdminOrderNote(
   actor: ActorContext,
   orderNumber: string,
@@ -719,7 +920,7 @@ export async function listAdminSellers(actor: ActorContext, input: PageInput) {
       include: {
         _count: { select: { stores: true } },
         stores: {
-          select: { orders: { select: { grandTotal: true, status: true } } },
+          select: { id: true },
         },
       },
       orderBy: { createdAt: "desc" },
@@ -729,6 +930,19 @@ export async function listAdminSellers(actor: ActorContext, input: PageInput) {
     }),
     prisma.seller.count({ where }),
   ]);
+  const storeIds = items.flatMap((seller) => seller.stores.map(({ id }) => id));
+  const aggregates = storeIds.length
+    ? await prisma.order.groupBy({
+        _count: { _all: true },
+        _sum: { grandTotal: true },
+        by: ["storeId"],
+        where: {
+          status: { notIn: [OrderStatus.CANCELLED, OrderStatus.REFUNDED] },
+          storeId: { in: storeIds },
+        },
+      })
+    : [];
+  const byStore = new Map(aggregates.map((row) => [row.storeId, row]));
   return {
     items: items.map((s) => ({
       id: s.id,
@@ -737,16 +951,15 @@ export async function listAdminSellers(actor: ActorContext, input: PageInput) {
       status: s.status,
       storeCount: s._count.stores,
       gmv: decimal(
-        s.stores
-          .flatMap((x) => x.orders)
-          .filter(
-            (o) =>
-              o.status !== OrderStatus.CANCELLED &&
-              o.status !== OrderStatus.REFUNDED,
-          )
-          .reduce((sum, o) => sum.add(o.grandTotal), new Prisma.Decimal(0)),
+        s.stores.reduce(
+          (sum, store) => sum.add(byStore.get(store.id)?._sum.grandTotal ?? 0),
+          new Prisma.Decimal(0),
+        ),
       ),
-      orderCount: s.stores.flatMap((x) => x.orders).length,
+      orderCount: s.stores.reduce(
+        (count, store) => count + (byStore.get(store.id)?._count._all ?? 0),
+        0,
+      ),
     })),
     page: input.page,
     total,
@@ -863,7 +1076,11 @@ export async function updateAdminStore(
   input: z.infer<typeof storeAdminUpdateSchema>,
   requestId?: string,
 ) {
-  assertAdmin(actor, Permission.StoresManage);
+  assertPermission(actor, Permission.AdminAccess);
+  if (input.commissionRate !== undefined)
+    assertPermission(actor, Permission.FinanceCommissionManage);
+  if (input.isActive !== undefined || input.status !== undefined)
+    assertPermission(actor, Permission.StoresManage);
   return prisma.$transaction(async (tx) => {
     const current = await tx.store.findUnique({ where: { id: storeId } });
     if (!current)
@@ -879,11 +1096,33 @@ export async function updateAdminStore(
       },
       where: { id: storeId },
     });
-    if (input.commissionRate)
+    if (input.commissionRate !== undefined) {
+      const seller = await tx.seller.findUniqueOrThrow({
+        where: { id: current.sellerId },
+      });
       await tx.seller.update({
         data: { defaultCommissionRate: input.commissionRate },
         where: { id: current.sellerId },
       });
+      await tx.commissionRateHistory.create({
+        data: {
+          changedByUserId: actor.userId,
+          newRate: input.commissionRate,
+          oldRate: seller.defaultCommissionRate,
+          reason: input.commissionReason!,
+          sellerId: current.sellerId,
+        },
+      });
+      await audit(tx, actor, {
+        action: "seller.commission_rate_changed",
+        after: { rate: input.commissionRate },
+        before: { rate: seller.defaultCommissionRate.toFixed(2) },
+        reason: input.commissionReason,
+        requestId,
+        subjectId: current.sellerId,
+        subjectType: "Seller",
+      });
+    }
     await audit(tx, actor, {
       action: "store.moderated",
       after: { isActive: store.isActive, status: store.status },
@@ -938,6 +1177,24 @@ export async function moderateProduct(
     const current = await tx.product.findUnique({ where: { id: productId } });
     if (!current)
       throw new MarketplaceError("PRODUCT_UNAVAILABLE", "Товар не найден", 404);
+    const allowedModeration: Record<ProductStatus, readonly ProductStatus[]> = {
+      [ProductStatus.DRAFT]: [ProductStatus.ARCHIVED],
+      [ProductStatus.PENDING_REVIEW]: [
+        ProductStatus.ACTIVE,
+        ProductStatus.REJECTED,
+        ProductStatus.ARCHIVED,
+      ],
+      [ProductStatus.ACTIVE]: [ProductStatus.HIDDEN, ProductStatus.ARCHIVED],
+      [ProductStatus.HIDDEN]: [ProductStatus.ACTIVE, ProductStatus.ARCHIVED],
+      [ProductStatus.REJECTED]: [ProductStatus.ARCHIVED],
+      [ProductStatus.ARCHIVED]: [],
+    };
+    if (!allowedModeration[current.status].includes(input.status))
+      throw new MarketplaceError(
+        "PRODUCT_MODERATION_CONFLICT",
+        `Переход ${current.status} → ${input.status} запрещён`,
+        409,
+      );
     const product = await tx.product.update({
       data: {
         deletedAt: input.status === ProductStatus.ARCHIVED ? new Date() : null,
@@ -1054,37 +1311,32 @@ export async function updateAdminCustomer(
   userId: string,
   status: UserStatus,
   requestId?: string,
+  reason = "Customer account status change",
 ) {
   assertAdmin(actor, Permission.CustomersManage);
   if (status !== UserStatus.ACTIVE && status !== UserStatus.SUSPENDED)
     throw new MarketplaceError("VALIDATION_ERROR", "Недопустимый статус", 400);
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.user.findFirst({
-      where: {
-        id: userId,
-        roles: { some: { role: { code: UserRoleCode.CUSTOMER } } },
-      },
-    });
-    if (!current)
-      throw new MarketplaceError(
-        "ADMIN_RESOURCE_NOT_FOUND",
-        "Покупатель не найден",
-        404,
-      );
-    const user = await tx.user.update({
-      data: { status },
-      where: { id: userId },
-    });
-    await audit(tx, actor, {
-      action: "customer.status_changed",
-      after: { status },
-      before: { status: current.status },
-      requestId,
-      subjectId: userId,
-      subjectType: "Customer",
-    });
-    return user;
+  const target = await prisma.user.findFirst({
+    select: { id: true },
+    where: {
+      id: userId,
+      roles: { some: { role: { code: UserRoleCode.CUSTOMER } } },
+    },
   });
+  if (!target)
+    throw new MarketplaceError(
+      "ADMIN_RESOURCE_NOT_FOUND",
+      "Покупатель не найден",
+      404,
+    );
+  await setUserStatus(actor, {
+    reason,
+    ...(requestId ? { requestId } : {}),
+    requiredPermission: Permission.CustomersManage,
+    status,
+    targetUserId: userId,
+  });
+  return prisma.user.findUniqueOrThrow({ where: { id: userId } });
 }
 
 export async function listCouriers(actor: ActorContext) {
@@ -1136,7 +1388,19 @@ export async function createCourier(
       subjectId: courier.id,
       subjectType: "Courier",
     });
-    return courier;
+    const invitation = await createCourierInvitationInTransaction(tx, {
+      courierId: courier.id,
+      createdByUserId: actor.userId,
+      ...(requestId ? { requestId } : {}),
+    });
+    return {
+      ...courier,
+      activationExpiresAt: invitation.expiresAt,
+      activationUrl:
+        getEnv().NODE_ENV === "production"
+          ? null
+          : `${getEnv().APP_URL}/activate/courier/${invitation.token}`,
+    };
   });
 }
 export async function updateCourier(
@@ -1281,19 +1545,7 @@ export async function getFinanceOverview(
 ) {
   assertAdmin(actor, Permission.FinanceRead);
   const createdAt = dates(range.from, range.to);
-  const orderWhere: Prisma.OrderWhereInput = {
-    ...(createdAt ? { createdAt } : {}),
-    status: { notIn: [OrderStatus.CANCELLED, OrderStatus.REFUNDED] },
-  };
-  const [orders, commissions, payments, ledger] = await Promise.all([
-    prisma.order.aggregate({
-      _sum: { deliveryFee: true, grandTotal: true },
-      where: orderWhere,
-    }),
-    prisma.commission.aggregate({
-      _sum: { commissionAmount: true },
-      where: createdAt ? { createdAt } : {},
-    }),
+  const [payments, ledger, financialEntries] = await Promise.all([
     prisma.payment.groupBy({
       _count: true,
       _sum: { amount: true },
@@ -1306,10 +1558,33 @@ export async function getFinanceOverview(
       take: 100,
       where: createdAt ? { effectiveAt: createdAt } : {},
     }),
+    prisma.ledgerEntry.findMany({
+      include: {
+        account: { select: { accountType: true } },
+        transaction: { select: { eventType: true } },
+      },
+      where: {
+        transaction: {
+          ...(createdAt ? { effectiveAt: createdAt } : {}),
+          eventType: { in: ["ORDER_PLACED", "ORDER_CANCELLED"] },
+        },
+      },
+    }),
   ]);
-  const gmv = orders._sum.grandTotal ?? new Prisma.Decimal(0);
-  const commission = commissions._sum.commissionAmount ?? new Prisma.Decimal(0);
-  const delivery = orders._sum.deliveryFee ?? new Prisma.Decimal(0);
+  const accountNet = (accountType: string, natural: LedgerDirection) =>
+    financialEntries
+      .filter((entry) => entry.account.accountType === accountType)
+      .reduce(
+        (sum, entry) =>
+          entry.direction === natural
+            ? sum.add(entry.amount)
+            : sum.sub(entry.amount),
+        new Prisma.Decimal(0),
+      );
+  const gmv = accountNet("PAYMENT_CLEARING", LedgerDirection.DEBIT);
+  const commission = accountNet("COMMISSION_REVENUE", LedgerDirection.CREDIT);
+  const delivery = accountNet("DELIVERY_REVENUE", LedgerDirection.CREDIT);
+  const sellerAmount = accountNet("SELLER_PAYABLE", LedgerDirection.CREDIT);
   const refunds = payments
     .filter((p) => p.status === PaymentStatus.REFUNDED)
     .reduce((sum, p) => sum.add(p._sum.amount ?? 0), new Prisma.Decimal(0));
@@ -1338,8 +1613,142 @@ export async function getFinanceOverview(
       status: p.status,
     })),
     refunds: decimal(refunds),
-    sellerAmount: decimal(gmv.sub(delivery).sub(commission)),
+    sellerAmount: decimal(sellerAmount),
   };
+}
+
+export async function getCourierCashBalances(actor: ActorContext) {
+  assertAdmin(actor, Permission.FinanceRead);
+  const accounts = await prisma.ledgerAccount.findMany({
+    include: {
+      entries: { select: { amount: true, direction: true } },
+    },
+    where: {
+      accountType: "CASH_IN_TRANSIT",
+      ownerType: "COURIER",
+    },
+  });
+  return Promise.all(
+    accounts.map(async (account) => {
+      const outstanding = account.entries.reduce(
+        (sum, entry) =>
+          entry.direction === LedgerDirection.DEBIT
+            ? sum.add(entry.amount)
+            : sum.sub(entry.amount),
+        new Prisma.Decimal(0),
+      );
+      const courier = account.ownerId
+        ? await prisma.courier.findUnique({
+            select: { id: true, name: true },
+            where: { id: account.ownerId },
+          })
+        : null;
+      const lastSettlement = account.ownerId
+        ? await prisma.courierCashSettlement.findFirst({
+            orderBy: { createdAt: "desc" },
+            where: { courierId: account.ownerId },
+          })
+        : null;
+      return {
+        courier,
+        currencyCode: account.currencyCode,
+        lastSettlement,
+        outstanding: outstanding.toFixed(2),
+      };
+    }),
+  );
+}
+
+export async function recordCourierCashSettlement(
+  actor: ActorContext,
+  input: z.infer<typeof cashSettlementSchema>,
+  requestId?: string,
+) {
+  assertAdmin(actor, Permission.FinanceCashManage);
+  const amount = new Prisma.Decimal(input.amount);
+  if (!amount.greaterThan(0))
+    throw new MarketplaceError(
+      "VALIDATION_ERROR",
+      "Сумма должна быть больше нуля",
+      400,
+    );
+  return prisma.$transaction(
+    async (tx) => {
+      const existing = await tx.courierCashSettlement.findUnique({
+        where: { idempotencyKey: input.idempotencyKey },
+      });
+      if (existing) return existing;
+      const courier = await tx.courier.findUnique({
+        where: { id: input.courierId },
+      });
+      if (!courier)
+        throw new MarketplaceError(
+          "ADMIN_RESOURCE_NOT_FOUND",
+          "Курьер не найден",
+          404,
+        );
+      const account = await tx.ledgerAccount.findFirst({
+        where: {
+          accountType: "CASH_IN_TRANSIT",
+          currencyCode: input.currencyCode,
+          ownerId: courier.id,
+          ownerType: "COURIER",
+        },
+      });
+      if (!account)
+        throw new MarketplaceError(
+          "CASH_SETTLEMENT_CONFLICT",
+          "У курьера нет наличных к сверке",
+          409,
+        );
+      const totals = await tx.ledgerEntry.groupBy({
+        _sum: { amount: true },
+        by: ["direction"],
+        where: { ledgerAccountId: account.id },
+      });
+      const debit =
+        totals.find((row) => row.direction === LedgerDirection.DEBIT)?._sum
+          .amount ?? new Prisma.Decimal(0);
+      const credit =
+        totals.find((row) => row.direction === LedgerDirection.CREDIT)?._sum
+          .amount ?? new Prisma.Decimal(0);
+      const outstanding = debit.sub(credit);
+      if (amount.greaterThan(outstanding))
+        throw new MarketplaceError(
+          "CASH_SETTLEMENT_CONFLICT",
+          "Сумма сверки превышает задолженность курьера",
+          409,
+        );
+      const settlement = await tx.courierCashSettlement.create({
+        data: {
+          amount,
+          courierId: courier.id,
+          createdByUserId: actor.userId,
+          currencyCode: input.currencyCode,
+          idempotencyKey: input.idempotencyKey,
+          reason: input.reason,
+          reference: input.reference ?? null,
+        },
+      });
+      await postCourierCashSettlementLedger(tx, {
+        amount,
+        courierId: courier.id,
+        currencyCode: input.currencyCode,
+        settlementId: settlement.id,
+        userId: actor.userId,
+      });
+      await audit(tx, actor, {
+        action: "courier.cash_settled",
+        after: { amount: amount.toFixed(2), currencyCode: input.currencyCode },
+        reason: input.reason,
+        requestId,
+        subjectId: settlement.id,
+        subjectType: "CourierCashSettlement",
+      });
+      return settlement;
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
 }
 
 export async function listAuditLogs(actor: ActorContext, input: AuditFilter) {

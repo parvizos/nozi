@@ -1,2 +1,7 @@
-export { getEnv, parseServerEnv, serverEnvSchema } from "./env";
+export {
+  getEnv,
+  parseServerEnv,
+  resetEnvCacheForTests,
+  serverEnvSchema,
+} from "./env";
 export type { ServerEnv } from "./env";

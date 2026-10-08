@@ -28,26 +28,54 @@ function assertCustomer(actor: ActorContext): void {
 }
 
 function serializeOrder(order: OrderRecord) {
+  const {
+    cityId: _cityId,
+    customerUserId: _customerUserId,
+    storeId: _storeId,
+    version: _version,
+    ...safeOrder
+  } = order;
+  void _cityId;
+  void _customerUserId;
+  void _storeId;
+  void _version;
+  const deliveryAddress = order.deliveryAddress
+    ? (({ orderId: _orderId, ...address }) => {
+        void _orderId;
+        return address;
+      })(order.deliveryAddress)
+    : null;
   return {
-    ...order,
+    ...safeOrder,
     createdAt: order.createdAt.toISOString(),
-    deliveryAddress: order.deliveryAddress
+    deliveryAddress: deliveryAddress
       ? {
-          ...order.deliveryAddress,
-          createdAt: order.deliveryAddress.createdAt.toISOString(),
-          latitude: order.deliveryAddress.latitude?.toFixed(6) ?? null,
-          longitude: order.deliveryAddress.longitude?.toFixed(6) ?? null,
+          ...deliveryAddress,
+          createdAt: deliveryAddress.createdAt.toISOString(),
+          latitude: deliveryAddress.latitude?.toFixed(6) ?? null,
+          longitude: deliveryAddress.longitude?.toFixed(6) ?? null,
         }
       : null,
     deliveryFee: order.deliveryFee.toFixed(2),
     discountTotal: order.discountTotal.toFixed(2),
     grandTotal: order.grandTotal.toFixed(2),
-    items: order.items.map((item) => ({
-      ...item,
-      createdAt: item.createdAt.toISOString(),
-      lineTotal: item.lineTotal.toFixed(2),
-      unitPrice: item.unitPrice.toFixed(2),
-    })),
+    items: order.items.map((item) => {
+      const {
+        orderId: _orderId,
+        productId: _productId,
+        productVariantId: _variantId,
+        ...safeItem
+      } = item;
+      void _orderId;
+      void _productId;
+      void _variantId;
+      return {
+        ...safeItem,
+        createdAt: safeItem.createdAt.toISOString(),
+        lineTotal: safeItem.lineTotal.toFixed(2),
+        unitPrice: safeItem.unitPrice.toFixed(2),
+      };
+    }),
     itemsSubtotal: order.itemsSubtotal.toFixed(2),
     payment: order.payment
       ? {
@@ -64,10 +92,19 @@ function serializeOrder(order: OrderRecord) {
     requestedDeliveryWindowStart: order.requestedDeliveryWindowStart
       .toISOString()
       .slice(11, 16),
-    statusHistory: order.statusHistory.map((entry) => ({
-      ...entry,
-      createdAt: entry.createdAt.toISOString(),
-    })),
+    statusHistory: order.statusHistory.map((historyEntry) => {
+      const {
+        changedByUserId: _actorId,
+        orderId: _orderId,
+        ...entry
+      } = historyEntry;
+      void _actorId;
+      void _orderId;
+      return {
+        ...entry,
+        createdAt: entry.createdAt.toISOString(),
+      };
+    }),
     updatedAt: order.updatedAt.toISOString(),
   };
 }

@@ -23,7 +23,7 @@ export async function consumeCheckoutRateLimit(
   });
   if (bucket.count > limit) {
     throw new MarketplaceError(
-      "CHECKOUT_RATE_LIMITED",
+      "ADMIN_RATE_LIMITED",
       "Слишком много попыток оформления. Попробуйте через минуту",
       429,
     );
@@ -52,8 +52,36 @@ export async function consumeAdminMutationRateLimit(
   });
   if (bucket.count > limit) {
     throw new MarketplaceError(
-      "CHECKOUT_RATE_LIMITED",
+      "COURIER_RATE_LIMITED",
       "Слишком много административных операций",
+      429,
+    );
+  }
+}
+
+export async function consumeCourierActivationRateLimit(
+  tokenHash: string,
+  limit = 10,
+): Promise<void> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const bucketStart = new Date((nowSeconds - (nowSeconds % 900)) * 1000);
+  const keyHash = createHash("sha256")
+    .update(`courier-activation:${tokenHash}`)
+    .digest("hex");
+  const bucket = await prisma.rateLimitBucket.upsert({
+    create: {
+      bucketStart,
+      count: 1,
+      expiresAt: new Date(bucketStart.getTime() + 1_800_000),
+      keyHash,
+    },
+    update: { count: { increment: 1 } },
+    where: { keyHash_bucketStart: { bucketStart, keyHash } },
+  });
+  if (bucket.count > limit) {
+    throw new MarketplaceError(
+      "COURIER_ACTIVATION_RATE_LIMITED",
+      "Слишком много попыток активации. Повторите позже",
       429,
     );
   }

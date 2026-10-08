@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { assertRole, type ActorContext } from "@nozi/auth";
+import { getEnv } from "@nozi/config";
 import {
   CartStatus,
   InventoryReservationStatus,
@@ -30,6 +31,7 @@ import {
 import { getPaymentProvider } from "./payments";
 import { consumeCheckoutRateLimit } from "./rate-limit";
 import { postOrderLedger } from "./ledger";
+import { validateDeliverySlot } from "./delivery-slots";
 
 const IDEMPOTENCY_SCOPE = "customer.checkout";
 const ORDER_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -57,19 +59,6 @@ function orderNumber(now = new Date()): string {
 
 function checkoutHash(input: CheckoutInput): string {
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
-}
-
-function localToday(timeZone: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone,
-    year: "numeric",
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${value.year}-${value.month}-${value.day}`;
 }
 
 function dateValue(value: string): Date {
@@ -134,6 +123,9 @@ export async function placeOrder(
 ): Promise<PlaceOrderResult> {
   assertRole(actor, [UserRoleCode.CUSTOMER]);
   const input = checkoutSchema.parse(rawInput);
+  const paymentMethod = PaymentMethod[input.paymentMethod];
+  const provider = getPaymentProvider(paymentMethod);
+  const env = getEnv();
   const idempotencyKey = idempotencyKeySchema.parse(rawOptions.idempotencyKey);
   const requestHash = checkoutHash(input);
   const existing = await existingIdempotentOrder(
@@ -189,6 +181,33 @@ export async function placeOrder(
             },
           });
 
+          if (paymentMethod === PaymentMethod.CASH) {
+            const pendingCashOrders = await tx.order.count({
+              where: {
+                customerUserId: actor.userId,
+                paymentMethod: PaymentMethod.CASH,
+                status: {
+                  in: [
+                    OrderStatus.AWAITING_SELLER_CONFIRMATION,
+                    OrderStatus.CONFIRMED,
+                    OrderStatus.PREPARING,
+                    OrderStatus.READY_FOR_PICKUP,
+                    OrderStatus.COURIER_ASSIGNED,
+                    OrderStatus.PICKED_UP,
+                    OrderStatus.ON_THE_WAY,
+                  ],
+                },
+              },
+            });
+            if (pendingCashOrders >= env.MAX_PENDING_CASH_ORDERS_PER_CUSTOMER) {
+              throw new MarketplaceError(
+                "PENDING_CASH_ORDER_LIMIT",
+                "Сначала завершите текущие заказы с оплатой наличными",
+                409,
+              );
+            }
+          }
+
           const cart = await tx.cart.findFirst({
             include: {
               items: {
@@ -209,6 +228,7 @@ export async function placeOrder(
               store: {
                 include: {
                   city: { include: { country: true } },
+                  openingHours: true,
                   seller: true,
                 },
               },
@@ -233,15 +253,8 @@ export async function placeOrder(
               422,
             );
           }
-          if (input.deliveryDate < localToday(cart.store.city.timezone)) {
-            throw new MarketplaceError(
-              "VALIDATION_ERROR",
-              "Дата доставки не может быть в прошлом",
-              422,
-            );
-          }
-
           let itemsSubtotal = new Prisma.Decimal(0);
+          let preparationMinutes = cart.store.defaultPreparationMinutes;
           const itemSnapshots: Array<{
             currencyCode: string;
             imageObjectKey: string | null;
@@ -320,6 +333,10 @@ export async function placeOrder(
               }
             }
             const unitPrice = calculateUnitPrice(product.price, item.variant);
+            preparationMinutes = Math.max(
+              preparationMinutes,
+              product.preparationTimeMinutes ?? 0,
+            );
             const lineTotal = unitPrice.mul(item.quantity);
             itemsSubtotal = itemsSubtotal.add(lineTotal);
             itemSnapshots.push({
@@ -343,9 +360,23 @@ export async function placeOrder(
             );
           }
 
+          validateDeliverySlot({
+            date: input.deliveryDate,
+            preparationMinutes,
+            store: {
+              defaultPreparationMinutes: cart.store.defaultPreparationMinutes,
+              isActive: cart.store.isActive,
+              isOpen: cart.store.isOpen,
+              isTemporarilyPaused: cart.store.isTemporarilyPaused,
+              openingHours: cart.store.openingHours,
+              timezone: cart.store.city.timezone,
+            },
+            windowEnd: input.deliveryWindowEnd,
+            windowStart: input.deliveryWindowStart,
+          });
+
           const deliveryFee = cart.store.deliveryFeeAmount;
           const grandTotal = itemsSubtotal.add(deliveryFee);
-          const paymentMethod = PaymentMethod[input.paymentMethod];
           const order = await tx.order.create({
             data: {
               anonymousDelivery: input.anonymousDelivery,
@@ -408,11 +439,13 @@ export async function placeOrder(
                 productVariantId: item.productVariantId,
                 quantity: item.quantity,
                 status: InventoryReservationStatus.ACTIVE,
+                expiresAt: new Date(
+                  Date.now() + env.SELLER_CONFIRMATION_SLA_MINUTES * 60_000,
+                ),
               },
             });
           }
 
-          const provider = getPaymentProvider(paymentMethod);
           const intent = await provider.createIntent({
             amount: grandTotal.toFixed(2),
             currencyCode: cart.currencyCode,

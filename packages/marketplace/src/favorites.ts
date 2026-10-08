@@ -5,10 +5,11 @@ import {
   UserRoleCode,
   prisma,
 } from "@nozi/database";
+import { MarketplaceError } from "./errors";
 
-export class ProductUnavailableError extends Error {
+export class ProductUnavailableError extends MarketplaceError {
   constructor() {
-    super("Product is not available");
+    super("PRODUCT_UNAVAILABLE", "Product is not available", 404);
     this.name = "ProductUnavailableError";
   }
 }

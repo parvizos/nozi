@@ -26,6 +26,20 @@ export const adminCancelSchema = z.object({
 export const courierAssignmentSchema = z.object({
   courierId: z.string().uuid(),
 });
+export const failedDeliveryRetrySchema = z.object({
+  courierId: z.string().uuid(),
+  deliveryDate: z.iso.date(),
+  deliveryWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  deliveryWindowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+});
+export const cashSettlementSchema = z.object({
+  amount: z.string().regex(/^\d{1,10}(?:\.\d{1,2})?$/),
+  courierId: z.string().uuid(),
+  currencyCode: z.string().length(3).default("TJS"),
+  idempotencyKey: z.string().trim().min(16).max(128),
+  reason: z.string().trim().min(3).max(500),
+  reference: z.string().trim().max(160).optional(),
+});
 export const adminNoteSchema = z.object({
   body: z.string().trim().min(2).max(2000),
 });
@@ -45,19 +59,41 @@ export const sellerAdminUpdateSchema = z.object({
   reason: z.string().trim().min(2).max(500).optional(),
   status: z.enum(SellerStatus),
 });
-export const storeAdminUpdateSchema = z.object({
-  commissionRate: z
-    .string()
-    .regex(/^\d{1,2}(?:\.\d{1,2})?$/)
-    .optional(),
-  isActive: z.boolean().optional(),
-  status: z.enum(StoreStatus).optional(),
-});
-export const productModerationSchema = z.object({
-  note: z.string().trim().max(500).optional(),
-  status: z.enum(ProductStatus),
-});
+export const storeAdminUpdateSchema = z
+  .object({
+    commissionRate: z
+      .string()
+      .regex(/^\d{1,2}(?:\.\d{1,2})?$/)
+      .optional(),
+    commissionReason: z.string().trim().min(3).max(500).optional(),
+    isActive: z.boolean().optional(),
+    status: z.enum(StoreStatus).optional(),
+  })
+  .refine(
+    ({ commissionRate, commissionReason }) =>
+      commissionRate === undefined || Boolean(commissionReason),
+    {
+      message: "Укажите причину изменения комиссии",
+      path: ["commissionReason"],
+    },
+  );
+export const productModerationSchema = z
+  .object({
+    note: z.string().trim().max(500).optional(),
+    status: z.enum([
+      ProductStatus.ACTIVE,
+      ProductStatus.HIDDEN,
+      ProductStatus.REJECTED,
+      ProductStatus.ARCHIVED,
+    ]),
+  })
+  .refine(
+    ({ note, status }) =>
+      status !== ProductStatus.REJECTED || Boolean(note?.trim()),
+    { message: "Укажите причину отклонения", path: ["note"] },
+  );
 export const customerAdminUpdateSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
   status: z.enum(UserStatus),
 });
 export const categoryCreateSchema = z.object({

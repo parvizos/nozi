@@ -6,7 +6,8 @@ import { StarIcon } from "./icons";
 export function formatMoney(amount: string, currency: string): string {
   return new Intl.NumberFormat("ru-RU", {
     currency,
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
     style: "currency",
   }).format(Number(amount));
 }

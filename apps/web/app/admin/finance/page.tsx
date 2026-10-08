@@ -1,6 +1,11 @@
 import { Permission } from "@nozi/auth";
-import { financeRangeSchema, getFinanceOverview } from "@nozi/marketplace";
+import {
+  financeRangeSchema,
+  getCourierCashBalances,
+  getFinanceOverview,
+} from "@nozi/marketplace";
 import { requireAdminPageActor } from "../../../lib/require-admin-page";
+import { AdminCashSettlement } from "../../../components/admin-cash-settlement";
 export default async function AdminFinancePage({
   searchParams,
 }: {
@@ -8,10 +13,11 @@ export default async function AdminFinancePage({
 }) {
   const raw = await searchParams;
   const range = financeRangeSchema.parse({ from: raw.from, to: raw.to });
-  const data = await getFinanceOverview(
-    await requireAdminPageActor(Permission.FinanceRead),
-    range,
-  );
+  const actor = await requireAdminPageActor(Permission.FinanceRead);
+  const [data, cashBalances] = await Promise.all([
+    getFinanceOverview(actor, range),
+    getCourierCashBalances(actor),
+  ]);
   const cards = [
     ["GMV", data.gmv],
     ["Commission", data.marketplaceCommission],
@@ -51,6 +57,24 @@ export default async function AdminFinancePage({
             <strong className="mt-2 block text-2xl">{value} TJS</strong>
           </article>
         ))}
+      </section>
+      <section className="mt-6 rounded-2xl border bg-white p-6">
+        <h2 className="text-xl font-semibold">Наличные у курьеров</h2>
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {cashBalances
+            .filter(
+              (balance) => Number(balance.outstanding) > 0 && balance.courier,
+            )
+            .map((balance) => (
+              <AdminCashSettlement
+                amount={balance.outstanding}
+                courierId={balance.courier!.id}
+                courierName={balance.courier!.name}
+                currencyCode={balance.currencyCode}
+                key={`${balance.courier!.id}:${balance.currencyCode}`}
+              />
+            ))}
+        </div>
       </section>
       <div className="mt-6 grid gap-6 lg:grid-cols-[.6fr_1.4fr]">
         <section className="rounded-2xl border bg-white p-6">

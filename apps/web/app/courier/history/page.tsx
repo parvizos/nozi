@@ -1,10 +1,10 @@
 import {
   courierDeliveryFilterSchema,
-  listCourierDeliveries,
+  listCourierHistory,
 } from "@nozi/marketplace";
 import Link from "next/link";
 
-import { CourierDeliveryCard } from "../../../components/courier-delivery-card";
+import { CourierHistoryCard } from "../../../components/courier-history-card";
 import { requireCourierPageActor } from "../../../lib/require-courier-page";
 
 export default async function CourierHistoryPage({
@@ -18,7 +18,7 @@ export default async function CourierHistoryPage({
     pageSize: raw.pageSize,
     scope: "HISTORY",
   });
-  const data = await listCourierDeliveries(
+  const data = await listCourierHistory(
     await requireCourierPageActor(),
     filter,
   );
@@ -31,7 +31,7 @@ export default async function CourierHistoryPage({
       <div className="mt-6 space-y-4">
         {data.items.length ? (
           data.items.map((delivery) => (
-            <CourierDeliveryCard delivery={delivery} key={delivery.id} />
+            <CourierHistoryCard delivery={delivery} key={delivery.id} />
           ))
         ) : (
           <div className="rounded-3xl border border-dashed border-[#aac5b8] bg-white p-8 text-center">

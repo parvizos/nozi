@@ -143,6 +143,9 @@ importers:
       '@nozi/auth':
         specifier: workspace:*
         version: link:../auth
+      '@nozi/config':
+        specifier: workspace:*
+        version: link:../config
       '@nozi/database':
         specifier: workspace:*
         version: link:../database

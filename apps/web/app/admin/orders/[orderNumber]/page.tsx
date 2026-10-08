@@ -15,8 +15,16 @@ export default async function AdminOrderPage({
       ? listCouriers(actor)
       : Promise.resolve([]),
   ]);
+  const currentCourierIds = new Set(
+    order.courierAssignments
+      .filter((assignment) => assignment.status === "DELIVERY_FAILED")
+      .map((assignment) => assignment.courierId),
+  );
   const couriers = courierRows
-    .filter((c) => c.isActive && c.status === "AVAILABLE")
+    .filter(
+      (c) =>
+        c.isActive && (c.status === "AVAILABLE" || currentCourierIds.has(c.id)),
+    )
     .map((c) => ({ id: c.id, name: c.name }));
   return (
     <>

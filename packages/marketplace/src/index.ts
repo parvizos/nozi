@@ -83,8 +83,16 @@ export type { CustomerOrderView } from "./orders";
 export {
   CashPaymentProvider,
   getPaymentProvider,
+  testPaymentsEnabled,
   TestPaymentProvider,
 } from "./payments";
+export { expireStaleOrders } from "./reservation-expiry";
+export { validateDeliverySlot } from "./delivery-slots";
+export {
+  activateCourier,
+  courierActivationSchema,
+  resendCourierInvitation,
+} from "./courier-activation";
 export {
   addAdminOrderNote,
   adminCancelOrder,
@@ -98,6 +106,7 @@ export {
   getAdminShell,
   getAdminStore,
   getFinanceOverview,
+  getCourierCashBalances,
   listAdminCustomers,
   listAdminOrders,
   listAdminProducts,
@@ -106,6 +115,9 @@ export {
   listCategoriesAdmin,
   listCouriers,
   moderateProduct,
+  recordCourierCashSettlement,
+  retryFailedDelivery,
+  startFailedDeliveryReturn,
   updateAdminCustomer,
   updateAdminSeller,
   updateAdminStore,
@@ -121,14 +133,20 @@ export {
   categoryCreateSchema,
   categoryUpdateSchema,
   courierAssignmentSchema,
+  cashSettlementSchema,
   courierCreateSchema,
   courierUpdateSchema,
   customerAdminUpdateSchema,
   financeRangeSchema,
+  failedDeliveryRetrySchema,
   productModerationSchema,
   sellerAdminUpdateSchema,
   storeAdminUpdateSchema,
 } from "./admin-contracts";
+export {
+  getDevelopmentDeliveryCode,
+  overrideDeliveryProof,
+} from "./delivery-proof";
 export { DevelopmentObjectStorageProvider } from "./storage";
 export type { ObjectMetadata, ObjectStorageProvider } from "./storage";
 export type {
@@ -152,6 +170,7 @@ export {
   getCourierDelivery,
   getCourierShell,
   listCourierDeliveries,
+  listCourierHistory,
   recordCourierLocation,
   reportCourierDeliveryFailure,
   transitionCourierDelivery,

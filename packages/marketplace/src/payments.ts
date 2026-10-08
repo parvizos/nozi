@@ -3,6 +3,9 @@ import {
   PaymentProviderCode,
   PaymentStatus,
 } from "@nozi/database";
+import { getEnv, type ServerEnv } from "@nozi/config";
+
+import { MarketplaceError } from "./errors";
 
 export type PaymentIntentInput = {
   amount: string;
@@ -55,11 +58,31 @@ export class TestPaymentProvider implements PaymentProvider {
 
 const providers = new Map<PaymentMethod, PaymentProvider>([
   [PaymentMethod.CASH, new CashPaymentProvider()],
-  [PaymentMethod.TEST, new TestPaymentProvider()],
 ]);
 
+export function testPaymentsEnabled(
+  env: Pick<ServerEnv, "ENABLE_TEST_PAYMENTS" | "NODE_ENV"> = getEnv(),
+): boolean {
+  return env.NODE_ENV !== "production" && env.ENABLE_TEST_PAYMENTS;
+}
+
 export function getPaymentProvider(method: PaymentMethod): PaymentProvider {
+  if (method === PaymentMethod.TEST) {
+    if (!testPaymentsEnabled()) {
+      throw new MarketplaceError(
+        "PAYMENT_METHOD_UNAVAILABLE",
+        "Тестовый способ оплаты недоступен",
+        422,
+      );
+    }
+    return new TestPaymentProvider();
+  }
   const provider = providers.get(method);
-  if (!provider) throw new Error(`Payment method ${method} is not available`);
+  if (!provider)
+    throw new MarketplaceError(
+      "PAYMENT_METHOD_UNAVAILABLE",
+      "Способ оплаты недоступен",
+      422,
+    );
   return provider;
 }

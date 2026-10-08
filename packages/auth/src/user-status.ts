@@ -4,6 +4,7 @@ import {
   assertPermission,
   AuthorizationError,
   Permission,
+  type PermissionCode,
   type ActorContext,
 } from "./rbac";
 
@@ -12,11 +13,12 @@ export async function setUserStatus(
   command: {
     reason: string;
     requestId?: string;
+    requiredPermission?: PermissionCode;
     status: UserStatus;
     targetUserId: string;
   },
 ): Promise<void> {
-  assertPermission(actor, Permission.AdminManage);
+  assertPermission(actor, command.requiredPermission ?? Permission.AdminManage);
 
   const reason = command.reason.trim();
   if (reason.length < 3 || reason.length > 500) {
@@ -47,13 +49,15 @@ export async function setUserStatus(
     throw new Error("User not found");
   }
 
-  const targetIsSuperAdmin = target.roles.some(
-    ({ role }) => role.code === UserRoleCode.SUPER_ADMIN,
+  const targetIsProtectedAdmin = target.roles.some(
+    ({ role }) =>
+      role.code === UserRoleCode.SUPER_ADMIN ||
+      role.code === UserRoleCode.ADMIN,
   );
-  if (targetIsSuperAdmin && !actor.roles.has(UserRoleCode.SUPER_ADMIN)) {
+  if (targetIsProtectedAdmin && command.status !== UserStatus.ACTIVE) {
     throw new AuthorizationError(
       "FORBIDDEN",
-      "Only a super administrator can manage this account",
+      "Administrative accounts cannot be deactivated through user management",
     );
   }
 

@@ -3,13 +3,22 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type Action = "accept" | "arrived" | "pickup" | "start" | "deliver";
+type Action =
+  | "accept"
+  | "arrived"
+  | "pickup"
+  | "start"
+  | "deliver"
+  | "return"
+  | "returned";
 const nextAction: Record<string, Action | undefined> = {
   ACCEPTED: "arrived",
   ARRIVED_AT_STORE: "pickup",
   ASSIGNED: "accept",
   ON_THE_WAY: "deliver",
   PICKED_UP: "start",
+  DELIVERY_FAILED: "return",
+  RETURNING_TO_STORE: "returned",
 };
 const labels: Record<Action, string> = {
   accept: "Принять доставку",
@@ -17,14 +26,18 @@ const labels: Record<Action, string> = {
   deliver: "Заказ доставлен",
   pickup: "Забрал заказ",
   start: "Начать доставку",
+  return: "Возвращаю заказ в магазин",
+  returned: "Заказ возвращён в магазин",
 };
 
 export function CourierDeliveryActions({
   orderNumber,
   status,
+  deliveryCodeRequired,
 }: {
   orderNumber: string;
   status: string;
+  deliveryCodeRequired: boolean;
 }) {
   const router = useRouter();
   const action = nextAction[status];
@@ -83,8 +96,16 @@ export function CourierDeliveryActions({
         ? "Подтвердить, что заказ лично передан получателю?"
         : `${labels[action]}?`;
     if (!window.confirm(confirmation)) return;
+    const deliveryCode =
+      action === "deliver" && deliveryCodeRequired
+        ? window.prompt("Введите 6-значный код получателя")
+        : null;
+    if (action === "deliver" && deliveryCodeRequired && !deliveryCode) return;
     await post(
       `/api/v1/courier/deliveries/${encodeURIComponent(orderNumber)}/${action}`,
+      action === "deliver"
+        ? { deliveryCode: deliveryCode ?? undefined }
+        : undefined,
     );
   }
 
@@ -98,6 +119,10 @@ export function CourierDeliveryActions({
   }
 
   function shareLocation() {
+    if (!navigator.onLine) {
+      setError("Нет сети. Геопозиция не отправлена.");
+      return;
+    }
     if (!navigator.geolocation) {
       setError("Геопозиция не поддерживается устройством");
       return;
@@ -112,11 +137,14 @@ export function CourierDeliveryActions({
           orderNumber,
         });
       },
-      () => {
+      (positionError) => {
         setBusy("");
-        setError(
-          "Геопозиция не отправлена. Разрешение остаётся необязательным.",
-        );
+        const messages: Record<number, string> = {
+          1: "Доступ к геопозиции отклонён. Его можно разрешить в настройках браузера.",
+          2: "Позиция сейчас недоступна. Попробуйте ещё раз на открытом месте.",
+          3: "Не удалось определить позицию вовремя. Повторите попытку.",
+        };
+        setError(messages[positionError.code] ?? "Геопозиция не отправлена.");
       },
       { enableHighAccuracy: true, maximumAge: 60_000, timeout: 10_000 },
     );
@@ -174,6 +202,7 @@ export function CourierDeliveryActions({
               <option value="WRONG_ADDRESS">Неверный адрес</option>
               <option value="RECIPIENT_REFUSED">Получатель отказался</option>
               <option value="CANNOT_CONTACT">Не удалось связаться</option>
+              <option value="ACCESS_PROBLEM">Нет доступа к адресу</option>
               <option value="OTHER">Другое</option>
             </select>
           </label>

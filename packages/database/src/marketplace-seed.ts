@@ -316,8 +316,10 @@ export async function seedMarketplace(
         defaultPreparationMinutes: 35 + index * 10,
         deliveryFeeAmount: `${25 + index * 2}.00`,
         description: fixture.description,
+        deliveryEnabled: true,
         isActive: true,
         isOpen: index !== 3,
+        isTemporarilyPaused: false,
         logoObjectKey: fixture.logo,
         minimumOrderAmount: index === 2 ? "100.00" : "80.00",
         name: fixture.name,
@@ -333,7 +335,10 @@ export async function seedMarketplace(
         deliveryFeeAmount: `${25 + index * 2}.00`,
         deletedAt: null,
         description: fixture.description,
+        deliveryEnabled: true,
         isActive: true,
+        isOpen: index !== 3,
+        isTemporarilyPaused: false,
         logoObjectKey: fixture.logo,
         ratingAverage: fixture.rating,
         ratingCount: fixture.ratingCount,
@@ -367,7 +372,11 @@ export async function seedMarketplace(
           opensAt: dayOfWeek === 7 ? "10:00" : "09:00",
           storeId: store.id,
         },
-        update: {},
+        update: {
+          closesAt: dayOfWeek === 7 ? "18:00" : "20:00",
+          isClosed: false,
+          opensAt: dayOfWeek === 7 ? "10:00" : "09:00",
+        },
         where: { storeId_dayOfWeek: { dayOfWeek, storeId: store.id } },
       });
     }
@@ -617,6 +626,7 @@ export async function seedMarketplace(
         create: {
           id: `71000000-0000-4000-8000-00000000000${index + 1}`,
           orderId,
+          expiresAt: new Date(Date.now() + 15 * 60_000),
           productId: product.id,
           productVariantId: variant?.id ?? null,
           quantity: 1,
@@ -626,6 +636,7 @@ export async function seedMarketplace(
               : InventoryReservationStatus.ACTIVE,
         },
         update: {
+          expiresAt: new Date(Date.now() + 15 * 60_000),
           productId: product.id,
           productVariantId: variant?.id ?? null,
           status:

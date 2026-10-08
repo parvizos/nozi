@@ -69,35 +69,35 @@ export async function postOrderLedger(
       }),
     ]);
   const sellerAmount = input.itemsSubtotal.sub(input.commissionAmount);
+  const entries = [
+    {
+      amount: input.grandTotal,
+      direction: LedgerDirection.DEBIT,
+      ledgerAccountId: clearing.id,
+    },
+    {
+      amount: sellerAmount,
+      direction: LedgerDirection.CREDIT,
+      ledgerAccountId: sellerPayable.id,
+    },
+    {
+      amount: input.commissionAmount,
+      direction: LedgerDirection.CREDIT,
+      ledgerAccountId: commissionRevenue.id,
+    },
+    {
+      amount: input.deliveryFee,
+      direction: LedgerDirection.CREDIT,
+      ledgerAccountId: deliveryRevenue.id,
+    },
+  ].filter(({ amount }) => amount.greaterThan(0));
+  if (entries.length === 0) return;
   await tx.ledgerTransaction.create({
     data: {
       currencyCode: input.currencyCode,
       description: "Order financial recognition",
       effectiveAt: new Date(),
-      entries: {
-        create: [
-          {
-            amount: input.grandTotal,
-            direction: LedgerDirection.DEBIT,
-            ledgerAccountId: clearing.id,
-          },
-          {
-            amount: sellerAmount,
-            direction: LedgerDirection.CREDIT,
-            ledgerAccountId: sellerPayable.id,
-          },
-          {
-            amount: input.commissionAmount,
-            direction: LedgerDirection.CREDIT,
-            ledgerAccountId: commissionRevenue.id,
-          },
-          {
-            amount: input.deliveryFee,
-            direction: LedgerDirection.CREDIT,
-            ledgerAccountId: deliveryRevenue.id,
-          },
-        ],
-      },
+      entries: { create: entries },
       eventType: "ORDER_PLACED",
       referenceId: input.orderId,
       referenceType: "ORDER",
@@ -153,6 +153,60 @@ export async function reverseOrderLedger(
   });
 }
 
+export async function postCourierCashSettlementLedger(
+  tx: Tx,
+  input: {
+    amount: Prisma.Decimal;
+    courierId: string;
+    currencyCode: string;
+    settlementId: string;
+    userId: string;
+  },
+): Promise<void> {
+  if (!input.amount.greaterThan(0)) return;
+  const [cashInTransit, cashOnHand] = await Promise.all([
+    account(tx, {
+      accountType: "CASH_IN_TRANSIT",
+      currencyCode: input.currencyCode,
+      name: "Courier cash in transit",
+      ownerId: input.courierId,
+      ownerType: LedgerOwnerType.COURIER,
+    }),
+    account(tx, {
+      accountType: "CASH_ON_HAND",
+      currencyCode: input.currencyCode,
+      name: "Marketplace cash on hand",
+      ownerId: null,
+      ownerType: LedgerOwnerType.PLATFORM,
+    }),
+  ]);
+  await tx.ledgerTransaction.create({
+    data: {
+      createdByUserId: input.userId,
+      currencyCode: input.currencyCode,
+      description: "Courier cash settlement recorded",
+      effectiveAt: new Date(),
+      entries: {
+        create: [
+          {
+            amount: input.amount,
+            direction: LedgerDirection.DEBIT,
+            ledgerAccountId: cashOnHand.id,
+          },
+          {
+            amount: input.amount,
+            direction: LedgerDirection.CREDIT,
+            ledgerAccountId: cashInTransit.id,
+          },
+        ],
+      },
+      eventType: "CASH_SETTLED",
+      referenceId: input.settlementId,
+      referenceType: "COURIER_CASH_SETTLEMENT",
+    },
+  });
+}
+
 export async function postCashCollectionLedger(
   tx: Tx,
   input: {
@@ -171,6 +225,7 @@ export async function postCashCollectionLedger(
     },
   });
   if (existing) return;
+  if (!input.amount.greaterThan(0)) return;
   const [cashInTransit, clearing] = await Promise.all([
     account(tx, {
       accountType: "CASH_IN_TRANSIT",

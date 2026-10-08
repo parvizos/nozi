@@ -1,4 +1,4 @@
-import type { ActorContext } from "@nozi/auth";
+import { Permission, type ActorContext } from "@nozi/auth";
 import {
   InventoryReservationStatus,
   OrderActorType,
@@ -16,6 +16,7 @@ import { reverseOrderLedger } from "./ledger";
 
 type TransitionPrincipal = {
   actorType: OrderActorType;
+  permissions: ReadonlySet<string>;
   roles: ReadonlySet<UserRoleCode>;
   userId: string | null;
 };
@@ -52,10 +53,28 @@ export const allowedOrderTransitions: Readonly<
   ],
   [OrderStatus.COURIER_ASSIGNED]: [
     OrderStatus.PICKED_UP,
+    OrderStatus.DELIVERY_FAILED,
     OrderStatus.CANCELLED,
   ],
-  [OrderStatus.PICKED_UP]: [OrderStatus.ON_THE_WAY],
-  [OrderStatus.ON_THE_WAY]: [OrderStatus.DELIVERED],
+  [OrderStatus.PICKED_UP]: [
+    OrderStatus.ON_THE_WAY,
+    OrderStatus.DELIVERY_FAILED,
+  ],
+  [OrderStatus.ON_THE_WAY]: [
+    OrderStatus.DELIVERED,
+    OrderStatus.DELIVERY_FAILED,
+  ],
+  [OrderStatus.DELIVERY_FAILED]: [
+    OrderStatus.RESCHEDULED,
+    OrderStatus.RETURNING_TO_STORE,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.RESCHEDULED]: [
+    OrderStatus.COURIER_ASSIGNED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.RETURNING_TO_STORE]: [OrderStatus.RETURNED_TO_STORE],
+  [OrderStatus.RETURNED_TO_STORE]: [OrderStatus.CANCELLED],
   [OrderStatus.DELIVERED]: [],
   [OrderStatus.CANCELLED]: [OrderStatus.REFUNDED],
   [OrderStatus.REFUNDED]: [],
@@ -73,11 +92,17 @@ function principalFromActor(actor: ActorContext): TransitionPrincipal {
   } else if (actor.roles.has(UserRoleCode.COURIER)) {
     actorType = OrderActorType.COURIER;
   }
-  return { actorType, roles: actor.roles, userId: actor.userId };
+  return {
+    actorType,
+    permissions: actor.permissions,
+    roles: actor.roles,
+    userId: actor.userId,
+  };
 }
 
 export const systemTransitionPrincipal: TransitionPrincipal = {
   actorType: OrderActorType.SYSTEM,
+  permissions: new Set<string>(),
   roles: new Set<UserRoleCode>(),
   userId: null,
 };
@@ -85,11 +110,15 @@ export const systemTransitionPrincipal: TransitionPrincipal = {
 async function assertTransitionPermission(
   tx: Prisma.TransactionClient,
   principal: TransitionPrincipal,
-  order: { status: OrderStatus; storeId: string },
+  order: { id: string; status: OrderStatus; storeId: string },
   newStatus: OrderStatus,
 ): Promise<void> {
   if (principal.actorType === OrderActorType.SYSTEM) return;
-  if (principal.actorType === OrderActorType.ADMIN) return;
+  if (
+    principal.actorType === OrderActorType.ADMIN &&
+    principal.permissions.has(Permission.OrdersManage)
+  )
+    return;
   if (principal.actorType === OrderActorType.CUSTOMER) {
     throw new MarketplaceError(
       "INVALID_ORDER_TRANSITION",
@@ -128,8 +157,35 @@ async function assertTransitionPermission(
       OrderStatus.PICKED_UP,
       OrderStatus.ON_THE_WAY,
       OrderStatus.DELIVERED,
+      OrderStatus.DELIVERY_FAILED,
+      OrderStatus.RETURNED_TO_STORE,
     ];
-    if (courierStatuses.includes(newStatus)) return;
+    const ownsActiveAssignment = principal.userId
+      ? await tx.courierAssignment.count({
+          where: {
+            courier: {
+              isActive: true,
+              status: { not: "SUSPENDED" },
+              userId: principal.userId,
+            },
+            orderId: order.id,
+            status: {
+              in: [
+                "ASSIGNED",
+                "ACCEPTED",
+                "ARRIVED_AT_STORE",
+                "PICKED_UP",
+                "ON_THE_WAY",
+                "DELIVERY_FAILED",
+                "RETURNING_TO_STORE",
+                "RETURNED_TO_STORE",
+                "DELIVERED",
+              ],
+            },
+          },
+        })
+      : 0;
+    if (ownsActiveAssignment > 0 && courierStatuses.includes(newStatus)) return;
   }
   throw new MarketplaceError(
     "INVALID_ORDER_TRANSITION",
@@ -146,21 +202,33 @@ async function releaseReservations(
     where: { orderId, status: InventoryReservationStatus.ACTIVE },
   });
   for (const reservation of reservations) {
-    await tx.product.updateMany({
+    const product = await tx.product.updateMany({
       data: { reservedQuantity: { decrement: reservation.quantity } },
       where: {
         id: reservation.productId,
         reservedQuantity: { gte: reservation.quantity },
       },
     });
+    if (product.count !== 1)
+      throw new MarketplaceError(
+        "INVENTORY_RESERVATION_CONFLICT",
+        "Состояние резерва товара изменилось",
+        409,
+      );
     if (reservation.productVariantId) {
-      await tx.productVariant.updateMany({
+      const variant = await tx.productVariant.updateMany({
         data: { reservedQuantity: { decrement: reservation.quantity } },
         where: {
           id: reservation.productVariantId,
           reservedQuantity: { gte: reservation.quantity },
         },
       });
+      if (variant.count !== 1)
+        throw new MarketplaceError(
+          "INVENTORY_RESERVATION_CONFLICT",
+          "Состояние резерва варианта изменилось",
+          409,
+        );
     }
   }
   await tx.inventoryReservation.updateMany({
@@ -189,7 +257,11 @@ async function consumeReservations(
       },
     });
     if (product.count !== 1)
-      throw new Error("Invalid product reservation state");
+      throw new MarketplaceError(
+        "INVENTORY_RESERVATION_CONFLICT",
+        "Состояние резерва товара изменилось",
+        409,
+      );
     if (reservation.productVariantId) {
       const variant = await tx.productVariant.updateMany({
         data: {
@@ -203,7 +275,11 @@ async function consumeReservations(
         },
       });
       if (variant.count !== 1)
-        throw new Error("Invalid variant reservation state");
+        throw new MarketplaceError(
+          "INVENTORY_RESERVATION_CONFLICT",
+          "Состояние резерва варианта изменилось",
+          409,
+        );
     }
   }
   await tx.inventoryReservation.updateMany({
@@ -285,6 +361,10 @@ export async function transitionOrderInTransaction(
     }
   } else if (input.newStatus === OrderStatus.DELIVERED) {
     await consumeReservations(tx, order.id);
+  } else if (input.newStatus === OrderStatus.RETURNED_TO_STORE) {
+    // Physical stock was not decremented before delivery. Once the parcel is
+    // confirmed back at the store, releasing the reservation makes it sellable.
+    await releaseReservations(tx, order.id);
   }
   await tx.orderStatusHistory.create({
     data: {
@@ -297,21 +377,19 @@ export async function transitionOrderInTransaction(
       source: input.source ?? OrderStatusSource.API,
     },
   });
-  if (principal.userId) {
-    await tx.auditLog.create({
-      data: {
-        action: "order.status_changed",
-        actorRole: principal.actorType,
-        actorUserId: principal.userId,
-        afterRedacted: { status: input.newStatus },
-        beforeRedacted: { status: order.status },
-        reason: input.cancellationReasonCode ?? input.note ?? null,
-        requestId: input.requestId ?? null,
-        subjectId: order.id,
-        subjectType: "Order",
-      },
-    });
-  }
+  await tx.auditLog.create({
+    data: {
+      action: "order.status_changed",
+      actorRole: principal.actorType,
+      actorUserId: principal.userId,
+      afterRedacted: { status: input.newStatus },
+      beforeRedacted: { status: order.status },
+      reason: input.cancellationReasonCode ?? input.note ?? null,
+      requestId: input.requestId ?? null,
+      subjectId: order.id,
+      subjectType: "Order",
+    },
+  });
   return tx.order.findUniqueOrThrow({ where: { id: order.id } });
 }
 

@@ -9,6 +9,8 @@ export const Permission = {
   CustomersManage: "customers.manage",
   CustomersRead: "customers.read",
   FinanceRead: "finance.read",
+  FinanceCommissionManage: "finance.commission.manage",
+  FinanceCashManage: "finance.cash.manage",
   OrdersManage: "orders.manage",
   OrdersRead: "orders.read",
   ProductsModerate: "products.moderate",

@@ -21,6 +21,8 @@ const permissionDescriptions = {
   "customers.manage": "Suspend and reactivate customers",
   "customers.read": "Read customer support profiles",
   "finance.read": "Read finance and ledger data",
+  "finance.commission.manage": "Change seller commission rates",
+  "finance.cash.manage": "Record courier cash settlements",
   "orders.manage": "Manage marketplace orders",
   "orders.read": "Read marketplace orders",
   "products.moderate": "Moderate marketplace products",
@@ -81,7 +83,12 @@ const demoUsers: Array<{
   {
     email: "admin.finance@nozi.local",
     name: "NOZI Finance Admin",
-    permissions: ["finance.read", "audit.read"],
+    permissions: [
+      "finance.read",
+      "finance.commission.manage",
+      "finance.cash.manage",
+      "audit.read",
+    ],
     roles: [UserRoleCode.ADMIN],
   },
   {

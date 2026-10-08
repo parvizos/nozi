@@ -85,7 +85,7 @@ export const sellerProductInputSchema = z
     preparationTimeMinutes: z.number().int().min(5).max(1440).nullable(),
     price: money,
     slug,
-    status: z.enum([ProductStatus.DRAFT, ProductStatus.ACTIVE]),
+    status: z.enum([ProductStatus.DRAFT, ProductStatus.PENDING_REVIEW]),
     stockQuantity: z.number().int().min(0).max(1_000_000),
     storeId: z.string().uuid(),
     variants: z.array(productVariantSchema).max(50).default([]),
@@ -117,7 +117,8 @@ const openingHourSchema = z
   })
   .refine(
     ({ closesAt, isClosed, opensAt }) =>
-      isClosed || (opensAt !== null && closesAt !== null && opensAt < closesAt),
+      isClosed ||
+      (opensAt !== null && closesAt !== null && opensAt !== closesAt),
     { message: "Проверьте время открытия и закрытия" },
   );
 

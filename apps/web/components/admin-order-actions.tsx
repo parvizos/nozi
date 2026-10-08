@@ -70,6 +70,72 @@ export function AdminOrderActions({
             </button>
           </>
         ) : null}
+        {status === "DELIVERY_FAILED" ? (
+          <div className="w-full space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm font-semibold">Восстановление доставки</p>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              onChange={(event) => setCourierId(event.target.value)}
+              value={courierId}
+            >
+              {couriers.map((courier) => (
+                <option key={courier.id} value={courier.id}>
+                  {courier.name}
+                </option>
+              ))}
+            </select>
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                className="rounded-lg border px-2 py-2 text-sm"
+                id="retry-date"
+                type="date"
+              />
+              <input
+                className="rounded-lg border px-2 py-2 text-sm"
+                defaultValue="10:00"
+                id="retry-start"
+                type="time"
+              />
+              <input
+                className="rounded-lg border px-2 py-2 text-sm"
+                defaultValue="12:00"
+                id="retry-end"
+                type="time"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="rounded-lg bg-[#172131] px-3 py-2 text-sm font-semibold text-white"
+                disabled={busy || !courierId}
+                onClick={() =>
+                  void call("retry-delivery", {
+                    courierId,
+                    deliveryDate: (
+                      document.getElementById("retry-date") as HTMLInputElement
+                    ).value,
+                    deliveryWindowStart: (
+                      document.getElementById("retry-start") as HTMLInputElement
+                    ).value,
+                    deliveryWindowEnd: (
+                      document.getElementById("retry-end") as HTMLInputElement
+                    ).value,
+                  })
+                }
+                type="button"
+              >
+                Повторить доставку
+              </button>
+              <button
+                className="rounded-lg border px-3 py-2 text-sm font-semibold"
+                disabled={busy}
+                onClick={() => void call("return-to-store", {})}
+                type="button"
+              >
+                Вернуть в магазин
+              </button>
+            </div>
+          </div>
+        ) : null}
         {![
           "DELIVERED",
           "CANCELLED",

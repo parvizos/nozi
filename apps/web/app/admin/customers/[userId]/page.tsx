@@ -29,6 +29,7 @@ export default async function AdminCustomerPage({
         {actor.permissions.has(Permission.CustomersManage) ? (
           <AdminResourceAction
             body={{
+              reason: "Support account status change",
               status: customer.status === "SUSPENDED" ? "ACTIVE" : "SUSPENDED",
             }}
             label={customer.status === "SUSPENDED" ? "Reactivate" : "Suspend"}

@@ -14,11 +14,13 @@ export function CheckoutForm({
   cart,
   defaultName,
   defaultPhone,
+  enableTestPayments,
   minimumDate,
 }: {
   cart: CartView;
   defaultName: string;
   defaultPhone: string;
+  enableTestPayments: boolean;
   minimumDate: string;
 }) {
   const router = useRouter();
@@ -242,15 +244,17 @@ export function CheckoutForm({
                 </span>
               </span>
             </label>
-            <label className="flex items-center gap-3 rounded-2xl border border-[#dfd2cd] p-4 has-checked:border-[#8f2d56]">
-              <input name="paymentMethod" type="radio" value="TEST" />
-              <span>
-                <strong className="block text-sm">Тестовая оплата</strong>
-                <span className="text-xs text-[#756865]">
-                  Development provider без банковской карты
+            {enableTestPayments ? (
+              <label className="flex items-center gap-3 rounded-2xl border border-[#dfd2cd] p-4 has-checked:border-[#8f2d56]">
+                <input name="paymentMethod" type="radio" value="TEST" />
+                <span>
+                  <strong className="block text-sm">Тестовая оплата</strong>
+                  <span className="text-xs text-[#756865]">
+                    Development provider без банковской карты
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
+            ) : null}
           </div>
         </section>
       </div>

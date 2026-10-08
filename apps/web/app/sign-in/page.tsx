@@ -26,9 +26,11 @@ export default async function SignInPage({
           Войдите, чтобы сохранять любимые подарки и позже следить за заказами.
         </p>
         <SignInForm callbackUrl={callbackUrl} />
-        <p className="mt-5 text-center text-xs text-[#8b7c77]">
-          Development account: customer@nozi.local
-        </p>
+        {process.env.NODE_ENV === "development" ? (
+          <p className="mt-5 text-center text-xs text-[#8b7c77]">
+            Development account: customer@nozi.local
+          </p>
+        ) : null}
       </div>
     </main>
   );

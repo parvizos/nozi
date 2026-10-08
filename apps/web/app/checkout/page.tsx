@@ -4,7 +4,11 @@ import { redirect } from "next/navigation";
 
 import { getActorContext } from "@nozi/auth";
 import { UserRoleCode } from "@nozi/database";
-import { getCart, getCheckoutCustomerProfile } from "@nozi/marketplace";
+import {
+  getCart,
+  getCheckoutCustomerProfile,
+  testPaymentsEnabled,
+} from "@nozi/marketplace";
 
 import { CheckoutForm } from "../../components/checkout-form";
 import { SiteFooter } from "../../components/site-footer";
@@ -16,14 +20,14 @@ export const metadata: Metadata = {
 };
 export const dynamic = "force-dynamic";
 
-function tomorrowInDushanbe(): string {
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+function todayInDushanbe(): string {
+  const today = new Date();
   const parts = new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
     month: "2-digit",
     timeZone: "Asia/Dushanbe",
     year: "numeric",
-  }).formatToParts(tomorrow);
+  }).formatToParts(today);
   const value = Object.fromEntries(
     parts.map((part) => [part.type, part.value]),
   );
@@ -53,7 +57,8 @@ export default async function CheckoutPage() {
           cart={cart}
           defaultName={profile.name}
           defaultPhone={profile.phoneE164 ?? ""}
-          minimumDate={tomorrowInDushanbe()}
+          enableTestPayments={testPaymentsEnabled()}
+          minimumDate={todayInDushanbe()}
         />
       </main>
       <SiteFooter />

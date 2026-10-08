@@ -29,6 +29,7 @@ export function PATCH(
           uuidSchema.parse((await params).userId),
           input.status,
           requestId,
+          input.reason,
         ),
       };
     },

@@ -14,6 +14,7 @@ import {
   Prisma,
   prisma,
 } from "@nozi/database";
+import { getEnv } from "@nozi/config";
 
 import type {
   CourierDeliveryFilter,
@@ -22,6 +23,7 @@ import type {
 } from "./courier-contracts";
 import { MarketplaceError } from "./errors";
 import { postCashCollectionLedger } from "./ledger";
+import { issueDeliveryProof, verifyDeliveryProof } from "./delivery-proof";
 import { transitionOrderInTransaction } from "./order-state-machine";
 import { consumeCourierMutationRateLimit } from "./rate-limit";
 
@@ -31,6 +33,8 @@ export const activeCourierAssignmentStatuses = [
   CourierAssignmentStatus.ARRIVED_AT_STORE,
   CourierAssignmentStatus.PICKED_UP,
   CourierAssignmentStatus.ON_THE_WAY,
+  CourierAssignmentStatus.DELIVERY_FAILED,
+  CourierAssignmentStatus.RETURNING_TO_STORE,
 ] as const;
 
 export type CourierDeliveryAction =
@@ -38,7 +42,9 @@ export type CourierDeliveryAction =
   | "ARRIVE"
   | "PICKUP"
   | "START"
-  | "DELIVER";
+  | "DELIVER"
+  | "RETURN"
+  | "RETURNED";
 
 const actionConfig = {
   ACCEPT: {
@@ -75,6 +81,20 @@ const actionConfig = {
     nextAssignment: CourierAssignmentStatus.DELIVERED,
     orderStatus: OrderStatus.DELIVERED,
     timestamp: "deliveredAt",
+  },
+  RETURN: {
+    auditAction: "courier.return_started",
+    expectedAssignment: CourierAssignmentStatus.DELIVERY_FAILED,
+    nextAssignment: CourierAssignmentStatus.RETURNING_TO_STORE,
+    orderStatus: OrderStatus.RETURNING_TO_STORE,
+    timestamp: "updatedAt",
+  },
+  RETURNED: {
+    auditAction: "courier.return_completed",
+    expectedAssignment: CourierAssignmentStatus.RETURNING_TO_STORE,
+    nextAssignment: CourierAssignmentStatus.RETURNED_TO_STORE,
+    orderStatus: OrderStatus.RETURNED_TO_STORE,
+    timestamp: "updatedAt",
   },
 } as const;
 
@@ -179,6 +199,36 @@ const deliveryInclude = {
   },
 } satisfies Prisma.CourierAssignmentInclude;
 
+const historySelect = {
+  deliveredAt: true,
+  id: true,
+  order: {
+    select: {
+      deliveryAddress: { select: { cityName: true } },
+      orderNumber: true,
+      store: { select: { name: true } },
+    },
+  },
+  status: true,
+  updatedAt: true,
+} satisfies Prisma.CourierAssignmentSelect;
+
+function serializeHistory(
+  assignment: Prisma.CourierAssignmentGetPayload<{
+    select: typeof historySelect;
+  }>,
+) {
+  return {
+    deliveredAt: assignment.deliveredAt,
+    deliveryArea: assignment.order.deliveryAddress?.cityName ?? null,
+    id: assignment.id,
+    orderNumber: assignment.order.orderNumber,
+    status: assignment.status,
+    storeName: assignment.order.store.name,
+    updatedAt: assignment.updatedAt,
+  };
+}
+
 function serializeDelivery(
   assignment: Prisma.CourierAssignmentGetPayload<{
     include: typeof deliveryInclude;
@@ -187,6 +237,7 @@ function serializeDelivery(
   const payment = assignment.order.payment;
   return {
     ...assignment,
+    deliveryCodeRequired: getEnv().ENABLE_DELIVERY_CODES,
     latestLocation: assignment.locations[0]
       ? {
           ...assignment.locations[0],
@@ -221,6 +272,7 @@ export async function getCourierShell(actor: ActorContext) {
 
 export async function getCourierDashboard(actor: ActorContext) {
   const courier = await getCourierProfile(actor);
+  assertOperationalCourier(courier);
   const today = dushanbeStartOfDay();
   const [active, deliveredToday] = await Promise.all([
     prisma.courierAssignment.findMany({
@@ -257,25 +309,15 @@ export async function listCourierDeliveries(
   input: CourierDeliveryFilter,
 ) {
   const courier = await getCourierProfile(actor);
+  assertOperationalCourier(courier);
   const where: Prisma.CourierAssignmentWhereInput = {
     courierId: courier.id,
-    status:
-      input.scope === "HISTORY"
-        ? {
-            in: [
-              CourierAssignmentStatus.DELIVERED,
-              CourierAssignmentStatus.CANCELLED,
-            ],
-          }
-        : { in: [...activeCourierAssignmentStatuses] },
+    status: { in: [...activeCourierAssignmentStatuses] },
   };
   const [items, total] = await Promise.all([
     prisma.courierAssignment.findMany({
       include: deliveryInclude,
-      orderBy:
-        input.scope === "HISTORY"
-          ? { updatedAt: "desc" }
-          : { assignedAt: "asc" },
+      orderBy: { assignedAt: "asc" },
       skip: (input.page - 1) * input.pageSize,
       take: input.pageSize,
       where,
@@ -290,14 +332,52 @@ export async function listCourierDeliveries(
   };
 }
 
+export async function listCourierHistory(
+  actor: ActorContext,
+  input: Pick<CourierDeliveryFilter, "page" | "pageSize">,
+) {
+  const courier = await getCourierProfile(actor);
+  const where: Prisma.CourierAssignmentWhereInput = {
+    courierId: courier.id,
+    status: {
+      in: [
+        CourierAssignmentStatus.DELIVERED,
+        CourierAssignmentStatus.CANCELLED,
+        CourierAssignmentStatus.RETURNED_TO_STORE,
+      ],
+    },
+  };
+  const [items, total] = await Promise.all([
+    prisma.courierAssignment.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: historySelect,
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+      where,
+    }),
+    prisma.courierAssignment.count({ where }),
+  ]);
+  return {
+    items: items.map(serializeHistory),
+    page: input.page,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / input.pageSize)),
+  };
+}
+
 export async function getCourierDelivery(
   actor: ActorContext,
   orderNumber: string,
 ) {
   const courier = await getCourierProfile(actor);
+  assertOperationalCourier(courier);
   const assignment = await prisma.courierAssignment.findFirst({
     include: deliveryInclude,
-    where: { courierId: courier.id, order: { orderNumber } },
+    where: {
+      courierId: courier.id,
+      order: { orderNumber },
+      status: { in: [...activeCourierAssignmentStatuses] },
+    },
   });
   if (!assignment) {
     throw new MarketplaceError(
@@ -314,11 +394,46 @@ export async function transitionCourierDelivery(
   orderNumber: string,
   action: CourierDeliveryAction,
   requestId?: string,
+  input?: { deliveryCode?: string },
 ) {
   assertCourierRole(actor);
   await consumeCourierMutationRateLimit(actor.userId, action.toLowerCase());
   const config = actionConfig[action];
   try {
+    if (action === "DELIVER") {
+      const verification = await prisma.$transaction(async (tx) => {
+        const assignment = await tx.courierAssignment.findFirst({
+          include: { courier: true },
+          where: {
+            courier: { userId: actor.userId },
+            order: { orderNumber },
+          },
+        });
+        if (!assignment)
+          throw new MarketplaceError(
+            "COURIER_DELIVERY_NOT_FOUND",
+            "Доставка не найдена",
+            404,
+          );
+        assertOperationalCourier(assignment.courier);
+        if (
+          assignment.status !== CourierAssignmentStatus.ON_THE_WAY &&
+          assignment.status !== CourierAssignmentStatus.DELIVERED
+        )
+          throw new MarketplaceError(
+            "COURIER_ACTION_CONFLICT",
+            "Действие недоступно для текущего статуса доставки",
+            409,
+          );
+        return verifyDeliveryProof(tx, assignment.orderId, input?.deliveryCode);
+      });
+      if (verification === "INVALID")
+        throw new MarketplaceError(
+          "DELIVERY_CODE_INVALID",
+          "Неверный код подтверждения",
+          422,
+        );
+    }
     return await prisma.$transaction(
       async (tx) => {
         const courier = await tx.courier.findUnique({
@@ -376,6 +491,7 @@ export async function transitionCourierDelivery(
             tx,
             {
               actorType: OrderActorType.COURIER,
+              permissions: actor.permissions,
               roles: actor.roles,
               userId: actor.userId,
             },
@@ -386,6 +502,9 @@ export async function transitionCourierDelivery(
               requestId,
             },
           );
+        }
+        if (action === "START") {
+          await issueDeliveryProof(tx, assignment.orderId);
         }
         if (action === "DELIVER") {
           const payment = assignment.order.payment;
@@ -429,6 +548,25 @@ export async function transitionCourierDelivery(
               409,
             );
           }
+          const otherActive = await tx.courierAssignment.count({
+            where: {
+              courierId: courier.id,
+              id: { not: assignment.id },
+              status: { in: [...activeCourierAssignmentStatuses] },
+            },
+          });
+          await tx.courier.update({
+            data: {
+              status:
+                otherActive > 0 ? CourierStatus.BUSY : CourierStatus.AVAILABLE,
+            },
+            where: { id: courier.id },
+          });
+          await tx.deliveryFailure.updateMany({
+            data: { resolvedAt: now },
+            where: { assignmentId: assignment.id, resolvedAt: null },
+          });
+        } else if (action === "RETURNED") {
           const otherActive = await tx.courierAssignment.count({
             where: {
               courierId: courier.id,
@@ -499,6 +637,7 @@ export async function reportCourierDeliveryFailure(
       );
     assertOperationalCourier(courier);
     const assignment = await tx.courierAssignment.findFirst({
+      include: { order: true },
       where: {
         courierId: courier.id,
         order: { orderNumber },
@@ -518,16 +657,45 @@ export async function reportCourierDeliveryFailure(
         "Нельзя зарегистрировать проблему для этой доставки",
         409,
       );
+    const existingFailure = await tx.deliveryFailure.findFirst({
+      where: { assignmentId: assignment.id, resolvedAt: null },
+    });
+    if (existingFailure) return existingFailure;
+    const updated = await tx.courierAssignment.updateMany({
+      data: {
+        requiresAdminAttention: true,
+        status: CourierAssignmentStatus.DELIVERY_FAILED,
+      },
+      where: { id: assignment.id, status: assignment.status },
+    });
+    if (updated.count !== 1)
+      throw new MarketplaceError(
+        "COURIER_ACTION_CONFLICT",
+        "Доставка уже изменена другим процессом",
+        409,
+      );
+    await transitionOrderInTransaction(
+      tx,
+      {
+        actorType: OrderActorType.COURIER,
+        permissions: actor.permissions,
+        roles: actor.roles,
+        userId: actor.userId,
+      },
+      {
+        expectedVersion: assignment.order.version,
+        newStatus: OrderStatus.DELIVERY_FAILED,
+        note: `Delivery failed: ${input.reason}`,
+        orderId: assignment.orderId,
+        requestId,
+      },
+    );
     const failure = await tx.deliveryFailure.create({
       data: {
         assignmentId: assignment.id,
         note: input.note ?? null,
         reason: input.reason,
       },
-    });
-    await tx.courierAssignment.update({
-      data: { requiresAdminAttention: true },
-      where: { id: assignment.id },
     });
     await tx.auditLog.create({
       data: {

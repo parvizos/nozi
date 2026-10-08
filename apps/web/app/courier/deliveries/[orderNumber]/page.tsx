@@ -188,6 +188,7 @@ export default async function CourierDeliveryPage({
           </p>
         ) : null}
         <CourierDeliveryActions
+          deliveryCodeRequired={delivery.deliveryCodeRequired}
           orderNumber={delivery.order.orderNumber}
           status={delivery.status}
         />
