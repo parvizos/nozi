@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { buildActorContext, Permission, type ActorContext } from "@nozi/auth";
+import { resetEnvCacheForTests } from "@nozi/config";
 import {
   CourierAssignmentStatus,
   CourierStatus,
@@ -21,11 +22,17 @@ import {
   seedMarketplace,
 } from "@nozi/database";
 
-import { adminCancelOrder, assignCourier } from "./admin";
+import {
+  adminCancelOrder,
+  assignCourier,
+  retryFailedDelivery,
+  startFailedDeliveryReturn,
+} from "./admin";
 import { addCartItem } from "./cart";
 import { placeOrder } from "./checkout";
 import type { CheckoutInput } from "./checkout-contracts";
 import {
+  activeCourierAssignmentStatuses,
   getCourierDelivery,
   listCourierDeliveries,
   recordCourierLocation,
@@ -33,7 +40,9 @@ import {
   transitionCourierDelivery,
 } from "./courier";
 import { courierFailureSchema } from "./courier-contracts";
+import { getDevelopmentDeliveryCode } from "./delivery-proof";
 import { transitionOrder } from "./order-state-machine";
+import { getCustomerOrder } from "./orders";
 
 let fixtureProductId = "";
 let fixtureVariantId = "";
@@ -205,6 +214,15 @@ beforeAll(async () => {
   await prisma.storeAddress.create({
     data: { cityId: city.id, line1: "Phase 6 pickup point", storeId: store.id },
   });
+  await prisma.storeOpeningHour.createMany({
+    data: Array.from({ length: 7 }, (_, index) => ({
+      closesAt: "23:59",
+      dayOfWeek: index + 1,
+      isClosed: false,
+      opensAt: "00:00",
+      storeId: store.id,
+    })),
+  });
   const product = await prisma.product.create({
     data: {
       categoryId: category.id,
@@ -270,13 +288,31 @@ describe.sequential("courier authorization and lifecycle", () => {
     const before = await prisma.product.findUniqueOrThrow({
       where: { id: fixtureProductId },
     });
-    await advance(fixture.courier.actor, fixture.order.orderNumber, [
-      "ACCEPT",
-      "ARRIVE",
-      "PICKUP",
-      "START",
-      "DELIVER",
-    ]);
+    const previousDeliveryCodes = process.env.ENABLE_DELIVERY_CODES;
+    process.env.ENABLE_DELIVERY_CODES = "true";
+    resetEnvCacheForTests();
+    try {
+      await advance(fixture.courier.actor, fixture.order.orderNumber, [
+        "ACCEPT",
+        "ARRIVE",
+        "PICKUP",
+        "START",
+      ]);
+      const { code } = await getDevelopmentDeliveryCode(
+        fixture.admin,
+        fixture.order.orderNumber,
+      );
+      await transitionCourierDelivery(
+        fixture.courier.actor,
+        fixture.order.orderNumber,
+        "DELIVER",
+        randomUUID(),
+        { deliveryCode: code },
+      );
+    } finally {
+      process.env.ENABLE_DELIVERY_CODES = previousDeliveryCodes ?? "false";
+      resetEnvCacheForTests();
+    }
     const [
       order,
       assignment,
@@ -312,6 +348,9 @@ describe.sequential("courier authorization and lifecycle", () => {
       }),
     ]);
     expect(order.status).toBe(OrderStatus.DELIVERED);
+    await expect(
+      getCustomerOrder(fixture.customer, fixture.order.orderNumber),
+    ).resolves.toMatchObject({ status: OrderStatus.DELIVERED });
     expect(assignment.status).toBe(CourierAssignmentStatus.DELIVERED);
     expect(assignment.acceptedAt).not.toBeNull();
     expect(assignment.arrivedAtStoreAt).not.toBeNull();
@@ -345,6 +384,42 @@ describe.sequential("courier authorization and lifecycle", () => {
         },
       }),
     ).toBe(5);
+  });
+
+  it("does not let another courier consume delivery-code attempts", async () => {
+    const fixture = await readyAssignment();
+    const attacker = await courier();
+    const previousDeliveryCodes = process.env.ENABLE_DELIVERY_CODES;
+    process.env.ENABLE_DELIVERY_CODES = "true";
+    resetEnvCacheForTests();
+    try {
+      await advance(fixture.courier.actor, fixture.order.orderNumber, [
+        "ACCEPT",
+        "ARRIVE",
+        "PICKUP",
+        "START",
+      ]);
+      const proof = await prisma.deliveryProof.findUniqueOrThrow({
+        where: { orderId: fixture.order.id },
+      });
+      await expect(
+        transitionCourierDelivery(
+          attacker.actor,
+          fixture.order.orderNumber,
+          "DELIVER",
+          randomUUID(),
+          { deliveryCode: "000000" },
+        ),
+      ).rejects.toMatchObject({ code: "COURIER_DELIVERY_NOT_FOUND" });
+      await expect(
+        prisma.deliveryProof.findUniqueOrThrow({
+          where: { orderId: fixture.order.id },
+        }),
+      ).resolves.toMatchObject({ attemptCount: proof.attemptCount });
+    } finally {
+      process.env.ENABLE_DELIVERY_CODES = previousDeliveryCodes ?? "false";
+      resetEnvCacheForTests();
+    }
   });
 
   it("rejects skipped delivery stages", async () => {
@@ -395,8 +470,11 @@ describe.sequential("courier failures, location and concurrency", () => {
       where: { orderId: fixture.order.id },
     });
     expect(assignment.requiresAdminAttention).toBe(true);
-    expect(assignment.status).toBe(CourierAssignmentStatus.ACCEPTED);
+    expect(assignment.status).toBe(CourierAssignmentStatus.DELIVERY_FAILED);
     expect(assignment.failures).toHaveLength(1);
+    await expect(
+      prisma.order.findUniqueOrThrow({ where: { id: fixture.order.id } }),
+    ).resolves.toMatchObject({ status: OrderStatus.DELIVERY_FAILED });
   });
 
   it("records location only for the courier's active delivery", async () => {
@@ -578,5 +656,184 @@ describe.sequential("courier failures, location and concurrency", () => {
         where: { eventType: "CASH_COLLECTED", referenceId: fixture.order.id },
       }),
     ).toBe(0);
+  });
+
+  it("retries a failed delivery with the same courier", async () => {
+    const fixture = await readyAssignment();
+    await advance(fixture.courier.actor, fixture.order.orderNumber, [
+      "ACCEPT",
+      "ARRIVE",
+      "PICKUP",
+      "START",
+    ]);
+    await reportCourierDeliveryFailure(
+      fixture.courier.actor,
+      fixture.order.orderNumber,
+      { reason: DeliveryFailureReason.RECIPIENT_UNAVAILABLE },
+    );
+    expect(
+      await prisma.payment.findUniqueOrThrow({
+        where: { orderId: fixture.order.id },
+      }),
+    ).toMatchObject({ status: PaymentStatus.PENDING });
+    expect(
+      await prisma.ledgerTransaction.count({
+        where: { eventType: "CASH_COLLECTED", referenceId: fixture.order.id },
+      }),
+    ).toBe(0);
+
+    await retryFailedDelivery(fixture.admin, fixture.order.orderNumber, {
+      courierId: fixture.courier.profile.id,
+      deliveryDate: checkoutInput("CASH").deliveryDate,
+      deliveryWindowEnd: "16:00",
+      deliveryWindowStart: "14:00",
+    });
+    expect(
+      await prisma.order.findUniqueOrThrow({ where: { id: fixture.order.id } }),
+    ).toMatchObject({ status: OrderStatus.COURIER_ASSIGNED });
+
+    const newAssignment = await prisma.courierAssignment.findFirstOrThrow({
+      orderBy: { assignedAt: "desc" },
+      where: { orderId: fixture.order.id },
+    });
+    expect(newAssignment.courierId).toBe(fixture.courier.profile.id);
+    expect(
+      await prisma.courierAssignment.count({
+        where: {
+          orderId: fixture.order.id,
+          status: { in: [...activeCourierAssignmentStatuses] },
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("retries a failed delivery with another courier and releases the previous courier", async () => {
+    const fixture = await readyAssignment();
+    const replacement = await courier();
+    await advance(fixture.courier.actor, fixture.order.orderNumber, [
+      "ACCEPT",
+      "ARRIVE",
+      "PICKUP",
+      "START",
+    ]);
+    await reportCourierDeliveryFailure(
+      fixture.courier.actor,
+      fixture.order.orderNumber,
+      { reason: DeliveryFailureReason.CANNOT_CONTACT },
+    );
+
+    await retryFailedDelivery(fixture.admin, fixture.order.orderNumber, {
+      courierId: replacement.profile.id,
+      deliveryDate: checkoutInput("CASH").deliveryDate,
+      deliveryWindowEnd: "18:00",
+      deliveryWindowStart: "16:00",
+    });
+
+    const currentAssignment = await prisma.courierAssignment.findFirstOrThrow({
+      orderBy: { assignedAt: "desc" },
+      where: { orderId: fixture.order.id },
+    });
+    expect(currentAssignment).toMatchObject({
+      courierId: replacement.profile.id,
+      status: CourierAssignmentStatus.ASSIGNED,
+    });
+    await expect(
+      prisma.courier.findUniqueOrThrow({
+        where: { id: fixture.courier.profile.id },
+      }),
+    ).resolves.toMatchObject({ status: CourierStatus.AVAILABLE });
+    await expect(
+      getCourierDelivery(fixture.courier.actor, fixture.order.orderNumber),
+    ).rejects.toMatchObject({ code: "COURIER_DELIVERY_NOT_FOUND" });
+  });
+
+  it("cancels after delivery failure without false payment or inventory finalization", async () => {
+    const fixture = await readyAssignment();
+    await advance(fixture.courier.actor, fixture.order.orderNumber, [
+      "ACCEPT",
+      "ARRIVE",
+      "PICKUP",
+      "START",
+    ]);
+    await reportCourierDeliveryFailure(
+      fixture.courier.actor,
+      fixture.order.orderNumber,
+      { reason: DeliveryFailureReason.RECIPIENT_REFUSED },
+    );
+
+    await adminCancelOrder(
+      fixture.admin,
+      fixture.order.orderNumber,
+      "Recipient refused after failed delivery",
+    );
+
+    await expect(
+      prisma.order.findUniqueOrThrow({ where: { id: fixture.order.id } }),
+    ).resolves.toMatchObject({ status: OrderStatus.CANCELLED });
+    await expect(
+      prisma.payment.findUniqueOrThrow({
+        where: { orderId: fixture.order.id },
+      }),
+    ).resolves.toMatchObject({ status: PaymentStatus.CANCELLED });
+    expect(
+      await prisma.ledgerTransaction.count({
+        where: { eventType: "CASH_COLLECTED", referenceId: fixture.order.id },
+      }),
+    ).toBe(0);
+    await expect(
+      prisma.inventoryReservation.findFirstOrThrow({
+        where: { orderId: fixture.order.id },
+      }),
+    ).resolves.toMatchObject({ status: InventoryReservationStatus.RELEASED });
+    await expect(
+      prisma.courier.findUniqueOrThrow({
+        where: { id: fixture.courier.profile.id },
+      }),
+    ).resolves.toMatchObject({ status: CourierStatus.AVAILABLE });
+  });
+
+  it("returns a failed parcel to stock and eventually releases the courier", async () => {
+    const fixture = await readyAssignment();
+    await advance(fixture.courier.actor, fixture.order.orderNumber, [
+      "ACCEPT",
+      "ARRIVE",
+      "PICKUP",
+      "START",
+    ]);
+    await reportCourierDeliveryFailure(
+      fixture.courier.actor,
+      fixture.order.orderNumber,
+      { reason: DeliveryFailureReason.WRONG_ADDRESS },
+    );
+    await startFailedDeliveryReturn(fixture.admin, fixture.order.orderNumber);
+    await transitionCourierDelivery(
+      fixture.courier.actor,
+      fixture.order.orderNumber,
+      "RETURNED",
+    );
+    expect(
+      await prisma.order.findUniqueOrThrow({ where: { id: fixture.order.id } }),
+    ).toMatchObject({ status: OrderStatus.RETURNED_TO_STORE });
+    expect(
+      await prisma.courier.findUniqueOrThrow({
+        where: { id: fixture.courier.profile.id },
+      }),
+    ).toMatchObject({ status: CourierStatus.AVAILABLE });
+    expect(
+      await prisma.inventoryReservation.findMany({
+        where: { orderId: fixture.order.id },
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: InventoryReservationStatus.RELEASED,
+        }),
+      ]),
+    );
+    expect(
+      await prisma.payment.findUniqueOrThrow({
+        where: { orderId: fixture.order.id },
+      }),
+    ).toMatchObject({ status: PaymentStatus.PENDING });
   });
 });

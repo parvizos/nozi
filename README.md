@@ -70,6 +70,12 @@ pnpm test
 pnpm build
 ```
 
+Integration tests deliberately refuse arbitrary databases. Create a dedicated
+local database named `nozi_test_*`, then run with `NODE_ENV=test`,
+`ALLOW_TEST_DATABASE=true`, and `TEST_DATABASE_URL` pointing to that local
+database. The guard also rejects the default `nozi` database, PostgreSQL system
+databases, non-loopback hosts, and missing explicit consent.
+
 Integration checks require PostgreSQL and the environment variables shown in `.env.example`.
 
 ## Monorepo

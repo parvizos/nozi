@@ -253,7 +253,7 @@ describe.sequential("seller product and store permissions", () => {
     const edited = await updateSellerProduct(manager, product.id, {
       ...input,
       name: "Phase Four Gift Updated",
-      status: ProductStatus.ACTIVE,
+      status: ProductStatus.PENDING_REVIEW,
       stockQuantity: 6,
       version: product.version,
     });
@@ -324,7 +324,7 @@ describe.sequential("seller product and store permissions", () => {
         preparationTimeMinutes: current.preparationTimeMinutes,
         price: current.price.toFixed(2),
         slug: current.slug,
-        status: ProductStatus.ACTIVE,
+        status: ProductStatus.PENDING_REVIEW,
         stockQuantity: current.reservedQuantity - 1,
         storeId: current.storeId,
         variants: [],

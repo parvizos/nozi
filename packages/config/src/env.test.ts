@@ -13,6 +13,7 @@ describe("parseServerEnv", () => {
   it("parses a valid test environment with safe defaults", () => {
     expect(parseServerEnv(validEnv)).toMatchObject({
       ALLOW_DEMO_SEED: false,
+      ENABLE_TEST_PAYMENTS: false,
       LOG_LEVEL: "info",
       NODE_ENV: "test",
       PORT: 3000,
@@ -42,5 +43,19 @@ describe("parseServerEnv", () => {
     expect(() =>
       parseServerEnv({ ...validEnv, NODE_ENV: "production" }),
     ).toThrow("APP_URL must use HTTPS in production");
+  });
+
+  it("allows test payments only behind an explicit non-production flag", () => {
+    expect(
+      parseServerEnv({ ...validEnv, ENABLE_TEST_PAYMENTS: "true" }),
+    ).toMatchObject({ ENABLE_TEST_PAYMENTS: true, NODE_ENV: "test" });
+    expect(() =>
+      parseServerEnv({
+        ...validEnv,
+        APP_URL: "https://nozi.example",
+        ENABLE_TEST_PAYMENTS: "true",
+        NODE_ENV: "production",
+      }),
+    ).toThrow("ENABLE_TEST_PAYMENTS must be false in production");
   });
 });

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { buildActorContext, type ActorContext } from "@nozi/auth";
+import { buildActorContext, Permission, type ActorContext } from "@nozi/auth";
 import {
   CartStatus,
   OrderStatus,
@@ -27,6 +27,8 @@ function actor(
   role: UserRoleCode = UserRoleCode.CUSTOMER,
 ): ActorContext {
   return buildActorContext({
+    explicitPermissions:
+      role === UserRoleCode.ADMIN ? [Permission.OrdersManage] : [],
     roles: [role],
     status: UserStatus.ACTIVE,
     userId,
@@ -85,6 +87,9 @@ async function productFixture(slug: string) {
 
 beforeAll(async () => {
   await seedMarketplace();
+  await prisma.store.updateMany({
+    data: { isOpen: true, isTemporarilyPaused: false },
+  });
 });
 
 describe.sequential("database-backed cart", () => {
@@ -312,18 +317,16 @@ describe.sequential("transactional checkout", () => {
         where: { id: variant.id },
       }),
     ]);
-    await Promise.all([
-      addCartItem(firstCustomer, {
-        productId: product.id,
-        productVariantId: variant.id,
-        quantity: 1,
-      }),
-      addCartItem(secondCustomer, {
-        productId: product.id,
-        productVariantId: variant.id,
-        quantity: 1,
-      }),
-    ]);
+    await addCartItem(firstCustomer, {
+      productId: product.id,
+      productVariantId: variant.id,
+      quantity: 1,
+    });
+    await addCartItem(secondCustomer, {
+      productId: product.id,
+      productVariantId: variant.id,
+      quantity: 1,
+    });
     const results = await Promise.allSettled([
       placeOrder(firstCustomer, checkoutInput(), {
         idempotencyKey: `checkout-${randomUUID()}`,

@@ -11,5 +11,6 @@ export default defineConfig({
     include: ["apps/**/*.test.ts", "packages/**/*.test.ts"],
     passWithNoTests: false,
     restoreMocks: true,
+    setupFiles: ["./vitest.setup.ts"],
   },
 });
