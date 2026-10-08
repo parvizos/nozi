@@ -1,5 +1,7 @@
 export {
   CartStatus,
+  CourierAssignmentStatus,
+  CourierStatus,
   InventoryReservationStatus,
   LedgerDirection,
   LedgerOwnerType,

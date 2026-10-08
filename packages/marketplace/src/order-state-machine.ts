@@ -12,6 +12,7 @@ import {
 } from "@nozi/database";
 
 import { MarketplaceError } from "./errors";
+import { reverseOrderLedger } from "./ledger";
 
 type TransitionPrincipal = {
   actorType: OrderActorType;
@@ -45,8 +46,14 @@ export const allowedOrderTransitions: Readonly<
     OrderStatus.READY_FOR_PICKUP,
     OrderStatus.CANCELLED,
   ],
-  [OrderStatus.READY_FOR_PICKUP]: [OrderStatus.COURIER_ASSIGNED],
-  [OrderStatus.COURIER_ASSIGNED]: [OrderStatus.PICKED_UP],
+  [OrderStatus.READY_FOR_PICKUP]: [
+    OrderStatus.COURIER_ASSIGNED,
+    OrderStatus.CANCELLED,
+  ],
+  [OrderStatus.COURIER_ASSIGNED]: [
+    OrderStatus.PICKED_UP,
+    OrderStatus.CANCELLED,
+  ],
   [OrderStatus.PICKED_UP]: [OrderStatus.ON_THE_WAY],
   [OrderStatus.ON_THE_WAY]: [OrderStatus.DELIVERED],
   [OrderStatus.DELIVERED]: [],
@@ -108,7 +115,13 @@ async function assertTransitionPermission(
       OrderStatus.READY_FOR_PICKUP,
       OrderStatus.CANCELLED,
     ];
-    if (membership > 0 && sellerStatuses.includes(newStatus)) return;
+    if (
+      membership > 0 &&
+      sellerStatuses.includes(newStatus) &&
+      (newStatus !== OrderStatus.CANCELLED ||
+        order.status === OrderStatus.AWAITING_SELLER_CONFIRMATION)
+    )
+      return;
   }
   if (principal.actorType === OrderActorType.COURIER) {
     const courierStatuses: readonly OrderStatus[] = [
@@ -250,6 +263,7 @@ export async function transitionOrderInTransaction(
   }
   if (input.newStatus === OrderStatus.CANCELLED) {
     await releaseReservations(tx, order.id);
+    await reverseOrderLedger(tx, order.id, principal.userId);
     const payment = await tx.payment.findUnique({
       where: { orderId: order.id },
     });

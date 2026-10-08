@@ -1,6 +1,6 @@
 # NOZI
 
-NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, transactional purchase flow, and Phase 4 seller workspace: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, RBAC, searchable catalog, server-side cart, checkout, seller order operations, product and stock management, store settings, audit logs, health endpoints and structured logging.
+NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, transactional purchase flow, seller workspace, and Phase 5 admin control center: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, granular RBAC, searchable catalog, server-side cart, checkout, seller operations, courier assignment, finance ledger, audit logs, health endpoints and structured logging.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the accepted design and delivery plan.
 
@@ -35,7 +35,7 @@ pnpm db:seed
 pnpm db:studio
 ```
 
-The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories, 48 products, seller memberships and orders in the incoming, confirmed, preparing and ready states. The seed refuses demo mode in production.
+The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories, 48 products, seller memberships, 3 couriers, orders in operational states, ledger entries, an internal note and audit history. The seed refuses demo mode in production.
 
 Money uses PostgreSQL `numeric(12,2)` and Prisma `Decimal`. The marketplace data-access layer serializes amounts as decimal strings; application code must not calculate money with JavaScript floating-point numbers.
 
@@ -43,15 +43,20 @@ Each customer has at most one active cart, and every cart belongs to one store. 
 
 Development-only demo accounts:
 
-| Role                | Email                        |
-| ------------------- | ---------------------------- |
-| Admin               | `admin@nozi.local`           |
-| Seller owner        | `seller@nozi.local`          |
-| Seller manager      | `seller.manager@nozi.local`  |
-| Seller operator     | `seller.operator@nozi.local` |
-| Second seller owner | `seller.atlas@nozi.local`    |
-| Courier             | `courier@nozi.local`         |
-| Customer            | `customer@nozi.local`        |
+| Role                | Email                                                |
+| ------------------- | ---------------------------------------------------- |
+| Operations admin    | `admin@nozi.local`                                   |
+| Support admin       | `admin.support@nozi.local`                           |
+| Catalog admin       | `admin.catalog@nozi.local`                           |
+| Finance admin       | `admin.finance@nozi.local`                           |
+| Super admin         | `superadmin@nozi.local`                              |
+| Seller owner        | `seller@nozi.local`                                  |
+| Seller manager      | `seller.manager@nozi.local`                          |
+| Seller operator     | `seller.operator@nozi.local`                         |
+| Second seller owner | `seller.atlas@nozi.local`                            |
+| Courier             | `courier@nozi.local`                                 |
+| Additional couriers | `courier.two@nozi.local`, `courier.three@nozi.local` |
+| Customer            | `customer@nozi.local`                                |
 
 All demo accounts use the local value of `DEMO_USER_PASSWORD`; no password is stored in this repository.
 
@@ -74,11 +79,31 @@ apps/web                    Next.js UI and REST API
 packages/auth               Better Auth, Argon2id and RBAC policies
 packages/config             typed environment validation
 packages/database           Prisma schema, migrations and seed
-packages/marketplace        catalog, cart, checkout, orders, seller services and state machine
+packages/marketplace        catalog, checkout, seller/admin services, ledger and state machine
 packages/observability      structured logging and request context
 ```
 
-The admin and courier interfaces are intentionally deferred to their implementation phases.
+The courier fulfilment interface remains deferred to Phase 6. Phase 5 includes the courier profile and assignment foundation used by admin operations.
+
+## Admin routes
+
+| Route                         | Purpose                                         |
+| ----------------------------- | ----------------------------------------------- |
+| `/admin`                      | Platform metrics and operational alerts         |
+| `/admin/orders`               | Polling live board, filters and pagination      |
+| `/admin/orders/[orderNumber]` | Full order, timeline, notes and allowed actions |
+| `/admin/sellers`              | Seller search and moderation                    |
+| `/admin/sellers/[sellerId]`   | Seller status, stores and performance           |
+| `/admin/stores/[storeId]`     | Store controls and seller commission            |
+| `/admin/products`             | Product moderation                              |
+| `/admin/customers`            | Customer search and status                      |
+| `/admin/customers/[userId]`   | Customer profile and order history              |
+| `/admin/couriers`             | Courier creation, status and active work        |
+| `/admin/categories`           | Category creation, hierarchy and activation     |
+| `/admin/finance`              | GMV, settlement components, payments and ledger |
+| `/admin/audit`                | Filtered mutation audit trail                   |
+
+Admin mutations are authorized by explicit permission codes in addition to the admin role. Order changes use the centralized state machine. Courier assignment and reassignment use serializable transactions plus a partial unique database index that permits only one active assignment per order.
 
 ## Seller routes
 

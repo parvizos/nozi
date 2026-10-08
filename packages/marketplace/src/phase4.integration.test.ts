@@ -215,7 +215,9 @@ describe.sequential("seller product and store permissions", () => {
   it("allows a manager to create, edit and archive a scoped product", async () => {
     const store = await prisma.store.findFirstOrThrow();
     const manager = await sellerActor(store.sellerId, SellerUserRole.MANAGER);
-    const category = await prisma.category.findFirstOrThrow();
+    const category = await prisma.category.findFirstOrThrow({
+      where: { isActive: true },
+    });
     const input = {
       categoryId: category.id,
       compareAtPrice: null,

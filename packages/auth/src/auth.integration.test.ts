@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { prisma, UserRoleCode, UserStatus } from "@nozi/database";
 
-import { buildActorContext } from "./rbac";
+import { buildActorContext, Permission } from "./rbac";
 import { auth } from "./server";
 import { setUserStatus } from "./user-status";
 
@@ -178,6 +178,7 @@ describe("database-backed authentication", () => {
     ]);
 
     const actor = buildActorContext({
+      explicitPermissions: [Permission.AdminManage],
       roles: [UserRoleCode.ADMIN],
       status: UserStatus.ACTIVE,
       userId: admin.id,

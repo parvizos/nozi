@@ -2,8 +2,20 @@ import { UserRoleCode, type UserStatus } from "@nozi/database";
 
 export const Permission = {
   AdminAccess: "admin:access",
-  AdminManagePermissions: "admin:permissions:manage",
-  AdminManageUsers: "admin:users:manage",
+  AdminManage: "admin.manage",
+  AuditRead: "audit.read",
+  CategoriesManage: "categories.manage",
+  CouriersManage: "couriers.manage",
+  CustomersManage: "customers.manage",
+  CustomersRead: "customers.read",
+  FinanceRead: "finance.read",
+  OrdersManage: "orders.manage",
+  OrdersRead: "orders.read",
+  ProductsModerate: "products.moderate",
+  SellersManage: "sellers.manage",
+  SellersRead: "sellers.read",
+  StoresManage: "stores.manage",
+  StoresRead: "stores.read",
   CourierAccess: "courier:access",
   CustomerAccess: "customer:access",
   SellerAccess: "seller:access",
@@ -15,7 +27,7 @@ const rolePermissions = {
   [UserRoleCode.CUSTOMER]: [Permission.CustomerAccess],
   [UserRoleCode.SELLER]: [Permission.SellerAccess],
   [UserRoleCode.COURIER]: [Permission.CourierAccess],
-  [UserRoleCode.ADMIN]: [Permission.AdminAccess, Permission.AdminManageUsers],
+  [UserRoleCode.ADMIN]: [Permission.AdminAccess],
   [UserRoleCode.SUPER_ADMIN]: Object.values(Permission),
 } satisfies Record<UserRoleCode, readonly PermissionCode[]>;
 

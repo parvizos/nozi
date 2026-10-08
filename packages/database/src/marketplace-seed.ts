@@ -1,5 +1,8 @@
 import {
+  CourierStatus,
   InventoryReservationStatus,
+  LedgerDirection,
+  LedgerOwnerType,
   OrderActorType,
   OrderStatus,
   OrderStatusSource,
@@ -217,8 +220,10 @@ function productSlug(
 }
 
 export type MarketplaceSeedUsers = {
+  adminId?: string | undefined;
   atlasOwnerId?: string | undefined;
   customerId?: string | undefined;
+  courierUserIds?: string[] | undefined;
   managerId?: string | undefined;
   operatorId?: string | undefined;
   ownerId?: string | undefined;
@@ -642,5 +647,131 @@ export async function seedMarketplace(
         where: { id: variant.id },
       });
     }
+  }
+
+  if (users.adminId) {
+    const variedStatuses = [
+      SellerStatus.PENDING,
+      SellerStatus.SUSPENDED,
+      SellerStatus.REJECTED,
+    ];
+    for (const [offset, status] of variedStatuses.entries()) {
+      const fixture = sellerFixtures[offset + 2];
+      if (!fixture) continue;
+      await prisma.seller.update({
+        data: { status },
+        where: { id: fixture.id },
+      });
+    }
+    for (const [index, userId] of (users.courierUserIds ?? []).entries()) {
+      await prisma.courier.upsert({
+        create: {
+          id: `80000000-0000-4000-8000-00000000000${index + 1}`,
+          isActive: true,
+          name:
+            ["Рустам Саидов", "Фарид Каримов", "Нилуфар Ахмедова"][index] ??
+            `Курьер ${index + 1}`,
+          phoneE164: `+99290000770${index}`,
+          status:
+            index === 0
+              ? CourierStatus.AVAILABLE
+              : index === 1
+                ? CourierStatus.BUSY
+                : CourierStatus.OFFLINE,
+          transportType: ["CAR", "SCOOTER", "BICYCLE"][index] ?? null,
+          userId,
+        },
+        update: {
+          isActive: true,
+          status:
+            index === 0
+              ? CourierStatus.AVAILABLE
+              : index === 1
+                ? CourierStatus.BUSY
+                : CourierStatus.OFFLINE,
+        },
+        where: { userId },
+      });
+    }
+    const demoOrderId = "70000000-0000-4000-8000-000000000001";
+    await prisma.adminNote.upsert({
+      create: {
+        authorUserId: users.adminId,
+        body: "Проверить SLA подтверждения магазина.",
+        id: "82000000-0000-4000-8000-000000000001",
+        orderId: demoOrderId,
+      },
+      update: { body: "Проверить SLA подтверждения магазина." },
+      where: { id: "82000000-0000-4000-8000-000000000001" },
+    });
+    await prisma.auditLog.upsert({
+      create: {
+        action: "seed.operational_review",
+        actorRole: "ADMIN",
+        actorUserId: users.adminId,
+        afterRedacted: { status: "REVIEW_REQUIRED" },
+        id: "83000000-0000-4000-8000-000000000001",
+        subjectId: demoOrderId,
+        subjectType: "Order",
+      },
+      update: {},
+      where: { id: "83000000-0000-4000-8000-000000000001" },
+    });
+    const [clearing, revenue] = await Promise.all([
+      prisma.ledgerAccount.upsert({
+        create: {
+          accountType: "SEED_CLEARING",
+          currencyCode: "TJS",
+          id: "84000000-0000-4000-8000-000000000001",
+          name: "Demo clearing",
+          ownerType: LedgerOwnerType.PLATFORM,
+        },
+        update: {},
+        where: { id: "84000000-0000-4000-8000-000000000001" },
+      }),
+      prisma.ledgerAccount.upsert({
+        create: {
+          accountType: "SEED_REVENUE",
+          currencyCode: "TJS",
+          id: "84000000-0000-4000-8000-000000000002",
+          name: "Demo revenue",
+          ownerType: LedgerOwnerType.PLATFORM,
+        },
+        update: {},
+        where: { id: "84000000-0000-4000-8000-000000000002" },
+      }),
+    ]);
+    const transaction = await prisma.ledgerTransaction.upsert({
+      create: {
+        currencyCode: "TJS",
+        description: "Balanced demo ledger event",
+        effectiveAt: new Date("2026-10-08T08:00:00.000Z"),
+        eventType: "SEED_BALANCED",
+        id: "85000000-0000-4000-8000-000000000001",
+        referenceId: demoOrderId,
+        referenceType: "ORDER",
+      },
+      update: {},
+      where: { id: "85000000-0000-4000-8000-000000000001" },
+    });
+    await prisma.ledgerEntry.deleteMany({
+      where: { ledgerTransactionId: transaction.id },
+    });
+    await prisma.ledgerEntry.createMany({
+      data: [
+        {
+          amount: "100.00",
+          direction: LedgerDirection.DEBIT,
+          ledgerAccountId: clearing.id,
+          ledgerTransactionId: transaction.id,
+        },
+        {
+          amount: "100.00",
+          direction: LedgerDirection.CREDIT,
+          ledgerAccountId: revenue.id,
+          ledgerTransactionId: transaction.id,
+        },
+      ],
+    });
   }
 }

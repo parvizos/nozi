@@ -14,48 +14,122 @@ const roleDescriptions: Record<UserRoleCode, string> = {
 
 const permissionDescriptions = {
   "admin:access": "Access the admin workspace",
-  "admin:permissions:manage": "Manage explicit admin permissions",
-  "admin:users:manage": "Manage marketplace user status",
+  "admin.manage": "Manage administrative access",
+  "audit.read": "Read audit trail",
+  "categories.manage": "Manage catalog categories",
+  "couriers.manage": "Manage couriers and assignments",
+  "customers.manage": "Suspend and reactivate customers",
+  "customers.read": "Read customer support profiles",
+  "finance.read": "Read finance and ledger data",
+  "orders.manage": "Manage marketplace orders",
+  "orders.read": "Read marketplace orders",
+  "products.moderate": "Moderate marketplace products",
+  "sellers.manage": "Manage seller lifecycle",
+  "sellers.read": "Read seller profiles",
+  "stores.manage": "Manage store moderation fields",
+  "stores.read": "Read store operations",
 } as const;
 
-const demoUsers: Array<{ email: string; name: string; roles: UserRoleCode[] }> =
-  [
-    {
-      email: "admin@nozi.local",
-      name: "NOZI Admin",
-      roles: [UserRoleCode.ADMIN],
-    },
-    {
-      email: "seller@nozi.local",
-      name: "Demo Seller",
-      roles: [UserRoleCode.SELLER],
-    },
-    {
-      email: "seller.manager@nozi.local",
-      name: "Safina Manager",
-      roles: [UserRoleCode.SELLER],
-    },
-    {
-      email: "seller.operator@nozi.local",
-      name: "Safina Operator",
-      roles: [UserRoleCode.SELLER],
-    },
-    {
-      email: "seller.atlas@nozi.local",
-      name: "Atlas Owner",
-      roles: [UserRoleCode.SELLER],
-    },
-    {
-      email: "courier@nozi.local",
-      name: "Demo Courier",
-      roles: [UserRoleCode.COURIER],
-    },
-    {
-      email: "customer@nozi.local",
-      name: "Demo Customer",
-      roles: [UserRoleCode.CUSTOMER],
-    },
-  ];
+const demoUsers: Array<{
+  email: string;
+  name: string;
+  permissions?: string[];
+  roles: UserRoleCode[];
+}> = [
+  {
+    email: "admin@nozi.local",
+    name: "NOZI Operations Admin",
+    permissions: [
+      "orders.read",
+      "orders.manage",
+      "sellers.read",
+      "sellers.manage",
+      "stores.read",
+      "stores.manage",
+      "customers.read",
+      "customers.manage",
+      "couriers.manage",
+      "audit.read",
+    ],
+    roles: [UserRoleCode.ADMIN],
+  },
+  {
+    email: "admin.support@nozi.local",
+    name: "NOZI Support Admin",
+    permissions: [
+      "orders.read",
+      "orders.manage",
+      "sellers.read",
+      "customers.read",
+      "customers.manage",
+      "audit.read",
+    ],
+    roles: [UserRoleCode.ADMIN],
+  },
+  {
+    email: "admin.catalog@nozi.local",
+    name: "NOZI Catalog Admin",
+    permissions: [
+      "sellers.read",
+      "stores.read",
+      "products.moderate",
+      "categories.manage",
+      "audit.read",
+    ],
+    roles: [UserRoleCode.ADMIN],
+  },
+  {
+    email: "admin.finance@nozi.local",
+    name: "NOZI Finance Admin",
+    permissions: ["finance.read", "audit.read"],
+    roles: [UserRoleCode.ADMIN],
+  },
+  {
+    email: "superadmin@nozi.local",
+    name: "NOZI Super Admin",
+    roles: [UserRoleCode.SUPER_ADMIN],
+  },
+  {
+    email: "seller@nozi.local",
+    name: "Demo Seller",
+    roles: [UserRoleCode.SELLER],
+  },
+  {
+    email: "seller.manager@nozi.local",
+    name: "Safina Manager",
+    roles: [UserRoleCode.SELLER],
+  },
+  {
+    email: "seller.operator@nozi.local",
+    name: "Safina Operator",
+    roles: [UserRoleCode.SELLER],
+  },
+  {
+    email: "seller.atlas@nozi.local",
+    name: "Atlas Owner",
+    roles: [UserRoleCode.SELLER],
+  },
+  {
+    email: "courier@nozi.local",
+    name: "Demo Courier",
+    roles: [UserRoleCode.COURIER],
+  },
+  {
+    email: "courier.two@nozi.local",
+    name: "Demo Courier Two",
+    roles: [UserRoleCode.COURIER],
+  },
+  {
+    email: "courier.three@nozi.local",
+    name: "Demo Courier Three",
+    roles: [UserRoleCode.COURIER],
+  },
+  {
+    email: "customer@nozi.local",
+    name: "Demo Customer",
+    roles: [UserRoleCode.CUSTOMER],
+  },
+];
 
 async function seedRolesAndPermissions(): Promise<void> {
   for (const roleCode of Object.values(UserRoleCode)) {
@@ -107,8 +181,19 @@ async function seedDemoUsers(password: string): Promise<void> {
 
     await prisma.$transaction([
       prisma.userRole.deleteMany({ where: { userId: user.id } }),
+      prisma.userAdminPermission.deleteMany({ where: { userId: user.id } }),
       ...roles.map((role) =>
         prisma.userRole.create({ data: { roleId: role.id, userId: user.id } }),
+      ),
+      ...(
+        await prisma.adminPermission.findMany({
+          select: { id: true },
+          where: { code: { in: demoUser.permissions ?? [] } },
+        })
+      ).map((permission) =>
+        prisma.userAdminPermission.create({
+          data: { permissionId: permission.id, userId: user.id },
+        }),
       ),
     ]);
   }
@@ -137,6 +222,10 @@ async function main(): Promise<void> {
             "seller.operator@nozi.local",
             "seller.atlas@nozi.local",
             "customer@nozi.local",
+            "admin@nozi.local",
+            "courier@nozi.local",
+            "courier.two@nozi.local",
+            "courier.three@nozi.local",
           ],
         },
       },
@@ -144,8 +233,14 @@ async function main(): Promise<void> {
     const userId = (email: string) =>
       seededUsers.find((user) => user.email === email)?.id;
     await seedMarketplace({
+      adminId: userId("admin@nozi.local"),
       atlasOwnerId: userId("seller.atlas@nozi.local"),
       customerId: userId("customer@nozi.local"),
+      courierUserIds: [
+        userId("courier@nozi.local"),
+        userId("courier.two@nozi.local"),
+        userId("courier.three@nozi.local"),
+      ].filter((id): id is string => Boolean(id)),
       managerId: userId("seller.manager@nozi.local"),
       operatorId: userId("seller.operator@nozi.local"),
       ownerId: userId("seller@nozi.local"),

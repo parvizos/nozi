@@ -29,6 +29,7 @@ import {
 } from "./order-state-machine";
 import { getPaymentProvider } from "./payments";
 import { consumeCheckoutRateLimit } from "./rate-limit";
+import { postOrderLedger } from "./ledger";
 
 const IDEMPOTENCY_SCOPE = "customer.checkout";
 const ORDER_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -433,7 +434,7 @@ export async function placeOrder(
             },
           });
           const commissionRate = cart.store.seller.defaultCommissionRate;
-          await tx.commission.create({
+          const commission = await tx.commission.create({
             data: {
               basisAmount: itemsSubtotal,
               commissionAmount: itemsSubtotal
@@ -445,6 +446,15 @@ export async function placeOrder(
               rate: commissionRate,
               sellerId: cart.store.sellerId,
             },
+          });
+          await postOrderLedger(tx, {
+            commissionAmount: commission.commissionAmount,
+            currencyCode: cart.currencyCode,
+            deliveryFee,
+            grandTotal,
+            itemsSubtotal,
+            orderId: order.id,
+            sellerId: cart.store.sellerId,
           });
           const transitioned = await transitionOrderInTransaction(
             tx,

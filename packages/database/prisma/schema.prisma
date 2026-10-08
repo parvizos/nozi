@@ -125,6 +125,21 @@ enum LedgerDirection {
   CREDIT
 }
 
+enum CourierStatus {
+  AVAILABLE
+  BUSY
+  OFFLINE
+  SUSPENDED
+}
+
+enum CourierAssignmentStatus {
+  ASSIGNED
+  ACCEPTED
+  PICKED_UP
+  DELIVERED
+  CANCELLED
+}
+
 model User {
   id              String     @id @default(uuid()) @db.Uuid
   name            String     @map("display_name") @db.VarChar(160)
@@ -139,23 +154,27 @@ model User {
   updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(3)
 
-  accounts              Account[]
-  sessions              Session[]
-  roles                 UserRole[]            @relation("AssignedRoles")
-  rolesGranted          UserRole[]            @relation("GrantedRoles")
-  customerProfile       CustomerProfile?
-  adminPermissions      UserAdminPermission[] @relation("AdminPermissionSubjects")
-  adminPermissionsGiven UserAdminPermission[] @relation("AdminPermissionGranters")
-  auditLogs             AuditLog[]
-  approvedSellers       Seller[]              @relation("SellerApprover")
-  sellerMemberships     SellerUser[]
-  favorites             Favorite[]
-  moderatedProducts     Product[]             @relation("ProductModerator")
-  carts                 Cart[]
-  orders                Order[]               @relation("OrderCustomer")
-  orderStatusChanges    OrderStatusHistory[]  @relation("OrderStatusChangedBy")
-  idempotencyKeys       IdempotencyKey[]
-  ledgerTransactions    LedgerTransaction[]   @relation("LedgerTransactionCreator")
+  accounts               Account[]
+  sessions               Session[]
+  roles                  UserRole[]            @relation("AssignedRoles")
+  rolesGranted           UserRole[]            @relation("GrantedRoles")
+  customerProfile        CustomerProfile?
+  adminPermissions       UserAdminPermission[] @relation("AdminPermissionSubjects")
+  adminPermissionsGiven  UserAdminPermission[] @relation("AdminPermissionGranters")
+  auditLogs              AuditLog[]
+  approvedSellers        Seller[]              @relation("SellerApprover")
+  sellerMemberships      SellerUser[]
+  favorites              Favorite[]
+  moderatedProducts      Product[]             @relation("ProductModerator")
+  carts                  Cart[]
+  orders                 Order[]               @relation("OrderCustomer")
+  orderStatusChanges     OrderStatusHistory[]  @relation("OrderStatusChangedBy")
+  idempotencyKeys        IdempotencyKey[]
+  ledgerTransactions     LedgerTransaction[]   @relation("LedgerTransactionCreator")
+  courierProfile         Courier?
+  courierAssignmentsMade CourierAssignment[]   @relation("CourierAssignmentAdmin")
+  adminNotesAuthored     AdminNote[]           @relation("AdminNoteAuthor")
+  adminNotesCustomer     AdminNote[]           @relation("AdminNoteCustomer")
 
   @@index([status, createdAt(sort: Desc)])
   @@index([deletedAt])
@@ -219,6 +238,7 @@ model Seller {
   users       SellerUser[]
   stores      Store[]
   commissions Commission[]
+  adminNotes  AdminNote[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([deletedAt])
@@ -267,12 +287,12 @@ model Store {
   updatedAt                 DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt                 DateTime?   @map("deleted_at") @db.Timestamptz(3)
 
-  seller   Seller        @relation(fields: [sellerId], references: [id], onDelete: Restrict)
-  city     City          @relation(fields: [cityId], references: [id], onDelete: Restrict)
-  address  StoreAddress?
-  products Product[]
-  carts    Cart[]
-  orders   Order[]
+  seller       Seller             @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  city         City               @relation(fields: [cityId], references: [id], onDelete: Restrict)
+  address      StoreAddress?
+  products     Product[]
+  carts        Cart[]
+  orders       Order[]
   openingHours StoreOpeningHour[]
 
   @@unique([cityId, slug])
@@ -529,6 +549,8 @@ model Order {
   inventoryReservations InventoryReservation[]
   payment               Payment?
   commission            Commission?
+  courierAssignments    CourierAssignment[]
+  adminNotes            AdminNote[]
 
   @@index([customerUserId, createdAt(sort: Desc)])
   @@index([storeId, status, createdAt(sort: Desc)])
@@ -743,6 +765,70 @@ model LedgerEntry {
 
   @@index([ledgerAccountId, createdAt])
   @@map("ledger_entries")
+}
+
+model Courier {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @unique @map("user_id") @db.Uuid
+  name              String        @db.VarChar(160)
+  phoneE164         String        @unique @map("phone_e164") @db.VarChar(20)
+  status            CourierStatus @default(OFFLINE)
+  isActive          Boolean       @default(true) @map("is_active")
+  transportType     String?       @map("transport_type") @db.VarChar(50)
+  latitude          Decimal?      @db.Decimal(9, 6)
+  longitude         Decimal?      @db.Decimal(9, 6)
+  locationUpdatedAt DateTime?     @map("location_updated_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user        User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignments CourierAssignment[]
+
+  @@index([status, isActive])
+  @@map("couriers")
+}
+
+model CourierAssignment {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  orderId               String                  @map("order_id") @db.Uuid
+  courierId             String                  @map("courier_id") @db.Uuid
+  assignedByAdminUserId String                  @map("assigned_by_admin_user_id") @db.Uuid
+  status                CourierAssignmentStatus @default(ASSIGNED)
+  assignedAt            DateTime                @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  acceptedAt            DateTime?               @map("accepted_at") @db.Timestamptz(3)
+  pickedUpAt            DateTime?               @map("picked_up_at") @db.Timestamptz(3)
+  deliveredAt           DateTime?               @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt           DateTime?               @map("cancelled_at") @db.Timestamptz(3)
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order      Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  courier    Courier @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  assignedBy User    @relation("CourierAssignmentAdmin", fields: [assignedByAdminUserId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, status])
+  @@index([courierId, status, assignedAt(sort: Desc)])
+  @@map("courier_assignments")
+}
+
+model AdminNote {
+  id             String   @id @default(uuid()) @db.Uuid
+  authorUserId   String   @map("author_user_id") @db.Uuid
+  orderId        String?  @map("order_id") @db.Uuid
+  sellerId       String?  @map("seller_id") @db.Uuid
+  customerUserId String?  @map("customer_user_id") @db.Uuid
+  body           String   @db.VarChar(2000)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  author   User    @relation("AdminNoteAuthor", fields: [authorUserId], references: [id], onDelete: Restrict)
+  order    Order?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  seller   Seller? @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  customer User?   @relation("AdminNoteCustomer", fields: [customerUserId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt(sort: Desc)])
+  @@index([sellerId, createdAt(sort: Desc)])
+  @@index([customerUserId, createdAt(sort: Desc)])
+  @@map("admin_notes")
 }
 
 model Session {

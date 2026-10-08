@@ -16,7 +16,7 @@ export async function setUserStatus(
     targetUserId: string;
   },
 ): Promise<void> {
-  assertPermission(actor, Permission.AdminManageUsers);
+  assertPermission(actor, Permission.AdminManage);
 
   const reason = command.reason.trim();
   if (reason.length < 3 || reason.length > 500) {
