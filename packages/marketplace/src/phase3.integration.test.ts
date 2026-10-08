@@ -389,9 +389,11 @@ describe.sequential("transactional checkout", () => {
       requestId: randomUUID(),
     });
 
-    await expect(
-      getCustomerOrder(owner, result.orderNumber),
-    ).resolves.toMatchObject({ orderNumber: result.orderNumber });
+    const customerView = await getCustomerOrder(owner, result.orderNumber);
+    expect(customerView).toMatchObject({ orderNumber: result.orderNumber });
+    expect(JSON.stringify(customerView)).not.toMatch(
+      /customerUserId|changedByUserId|adminNotes|"orderId"/,
+    );
     await expect(
       getCustomerOrder(stranger, result.orderNumber),
     ).rejects.toMatchObject({ code: "ORDER_NOT_FOUND", status: 404 });
