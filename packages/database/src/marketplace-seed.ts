@@ -1,4 +1,5 @@
 import {
+  CourierAssignmentStatus,
   CourierStatus,
   InventoryReservationStatus,
   LedgerDirection,
@@ -410,6 +411,7 @@ export async function seedMarketplace(
           name,
           price: `${price}.00`,
           status: ProductStatus.ACTIVE,
+          stockQuantity: 6 + (globalIndex % 19),
           storeId: store.id,
         },
         where: { slug },
@@ -475,6 +477,7 @@ export async function seedMarketplace(
               productId: fixture.productId,
               sku: fixture.sku,
               sortOrder: fixture.sortOrder,
+              stockQuantity: fixture.stockQuantity,
             },
             where: { id: existing.id },
           });
@@ -494,6 +497,8 @@ export async function seedMarketplace(
       OrderStatus.CONFIRMED,
       OrderStatus.PREPARING,
       OrderStatus.READY_FOR_PICKUP,
+      OrderStatus.COURIER_ASSIGNED,
+      OrderStatus.DELIVERED,
     ];
     for (const [index, status] of demoStatuses.entries()) {
       const store = stores[index % 2];
@@ -517,6 +522,10 @@ export async function seedMarketplace(
           currencyCode: "TJS",
           customerUserId: users.customerId,
           deliveryFee: "25.00",
+          deliveredAt:
+            status === OrderStatus.DELIVERED
+              ? new Date("2026-10-08T12:30:00.000Z")
+              : null,
           giftMessage:
             index % 2 ? "С теплом и самыми добрыми пожеланиями!" : null,
           grandTotal: amount,
@@ -535,7 +544,14 @@ export async function seedMarketplace(
           storeId: store.id,
           version: index + 2,
         },
-        update: { status, version: index + 2 },
+        update: {
+          deliveredAt:
+            status === OrderStatus.DELIVERED
+              ? new Date("2026-10-08T12:30:00.000Z")
+              : null,
+          status,
+          version: index + 2,
+        },
         where: { id: orderId },
       });
       await prisma.orderDeliveryAddress.upsert({
@@ -571,6 +587,10 @@ export async function seedMarketplace(
         OrderStatus.CONFIRMED,
         OrderStatus.PREPARING,
         OrderStatus.READY_FOR_PICKUP,
+        OrderStatus.COURIER_ASSIGNED,
+        OrderStatus.PICKED_UP,
+        OrderStatus.ON_THE_WAY,
+        OrderStatus.DELIVERED,
       ];
       const end = progression.indexOf(status);
       for (let step = 0; step <= end; step += 1) {
@@ -579,7 +599,13 @@ export async function seedMarketplace(
         await prisma.orderStatusHistory.create({
           data: {
             actorType:
-              step <= 1 ? OrderActorType.SYSTEM : OrderActorType.SELLER,
+              step <= 1
+                ? OrderActorType.SYSTEM
+                : step < 5
+                  ? OrderActorType.SELLER
+                  : step === 5
+                    ? OrderActorType.ADMIN
+                    : OrderActorType.COURIER,
             newStatus,
             orderId,
             previousStatus: step === 0 ? null : (progression[step - 1] ?? null),
@@ -594,12 +620,18 @@ export async function seedMarketplace(
           productId: product.id,
           productVariantId: variant?.id ?? null,
           quantity: 1,
-          status: InventoryReservationStatus.ACTIVE,
+          status:
+            status === OrderStatus.DELIVERED
+              ? InventoryReservationStatus.CONSUMED
+              : InventoryReservationStatus.ACTIVE,
         },
         update: {
           productId: product.id,
           productVariantId: variant?.id ?? null,
-          status: InventoryReservationStatus.ACTIVE,
+          status:
+            status === OrderStatus.DELIVERED
+              ? InventoryReservationStatus.CONSUMED
+              : InventoryReservationStatus.ACTIVE,
         },
         where: { id: `71000000-0000-4000-8000-00000000000${index + 1}` },
       });
@@ -611,9 +643,25 @@ export async function seedMarketplace(
           method: PaymentMethod.CASH,
           orderId,
           provider: PaymentProviderCode.CASH,
-          status: PaymentStatus.PENDING,
+          paidAt:
+            status === OrderStatus.DELIVERED
+              ? new Date("2026-10-08T12:30:00.000Z")
+              : null,
+          status:
+            status === OrderStatus.DELIVERED
+              ? PaymentStatus.PAID
+              : PaymentStatus.PENDING,
         },
-        update: { status: PaymentStatus.PENDING },
+        update: {
+          paidAt:
+            status === OrderStatus.DELIVERED
+              ? new Date("2026-10-08T12:30:00.000Z")
+              : null,
+          status:
+            status === OrderStatus.DELIVERED
+              ? PaymentStatus.PAID
+              : PaymentStatus.PENDING,
+        },
         where: { orderId },
       });
     }
@@ -626,8 +674,18 @@ export async function seedMarketplace(
           status: InventoryReservationStatus.ACTIVE,
         },
       });
+      const consumed = await prisma.inventoryReservation.aggregate({
+        _sum: { quantity: true },
+        where: {
+          productId: product.id,
+          status: InventoryReservationStatus.CONSUMED,
+        },
+      });
       await prisma.product.update({
-        data: { reservedQuantity: reserved._sum.quantity ?? 0 },
+        data: {
+          reservedQuantity: reserved._sum.quantity ?? 0,
+          stockQuantity: { decrement: consumed._sum.quantity ?? 0 },
+        },
         where: { id: product.id },
       });
     }
@@ -642,8 +700,18 @@ export async function seedMarketplace(
           status: InventoryReservationStatus.ACTIVE,
         },
       });
+      const consumed = await prisma.inventoryReservation.aggregate({
+        _sum: { quantity: true },
+        where: {
+          productVariantId: variant.id,
+          status: InventoryReservationStatus.CONSUMED,
+        },
+      });
       await prisma.productVariant.update({
-        data: { reservedQuantity: reserved._sum.quantity ?? 0 },
+        data: {
+          reservedQuantity: reserved._sum.quantity ?? 0,
+          stockQuantity: { decrement: consumed._sum.quantity ?? 0 },
+        },
         where: { id: variant.id },
       });
     }
@@ -674,10 +742,10 @@ export async function seedMarketplace(
           phoneE164: `+99290000770${index}`,
           status:
             index === 0
-              ? CourierStatus.AVAILABLE
+              ? CourierStatus.BUSY
               : index === 1
-                ? CourierStatus.BUSY
-                : CourierStatus.OFFLINE,
+                ? CourierStatus.AVAILABLE
+                : CourierStatus.SUSPENDED,
           transportType: ["CAR", "SCOOTER", "BICYCLE"][index] ?? null,
           userId,
         },
@@ -685,12 +753,73 @@ export async function seedMarketplace(
           isActive: true,
           status:
             index === 0
-              ? CourierStatus.AVAILABLE
+              ? CourierStatus.BUSY
               : index === 1
-                ? CourierStatus.BUSY
-                : CourierStatus.OFFLINE,
+                ? CourierStatus.AVAILABLE
+                : CourierStatus.SUSPENDED,
         },
         where: { userId },
+      });
+    }
+    const couriers = await prisma.courier.findMany({
+      orderBy: { id: "asc" },
+      where: { userId: { in: users.courierUserIds ?? [] } },
+    });
+    const activeCourier = couriers[0];
+    const historicalCourier = couriers[2];
+    if (activeCourier) {
+      const orderId = "70000000-0000-4000-8000-000000000005";
+      const assignmentId = "81000000-0000-4000-8000-000000000001";
+      await prisma.courierAssignment.deleteMany({
+        where: { id: { not: assignmentId }, orderId },
+      });
+      await prisma.courierAssignment.upsert({
+        create: {
+          assignedByAdminUserId: users.adminId,
+          courierId: activeCourier.id,
+          id: assignmentId,
+          orderId,
+          status: CourierAssignmentStatus.ASSIGNED,
+        },
+        update: {
+          acceptedAt: null,
+          arrivedAtStoreAt: null,
+          cancelledAt: null,
+          courierId: activeCourier.id,
+          deliveredAt: null,
+          onTheWayAt: null,
+          pickedUpAt: null,
+          requiresAdminAttention: false,
+          status: CourierAssignmentStatus.ASSIGNED,
+        },
+        where: { id: assignmentId },
+      });
+    }
+    if (historicalCourier) {
+      const orderId = "70000000-0000-4000-8000-000000000006";
+      const assignmentId = "81000000-0000-4000-8000-000000000002";
+      await prisma.courierAssignment.deleteMany({
+        where: { id: { not: assignmentId }, orderId },
+      });
+      await prisma.courierAssignment.upsert({
+        create: {
+          acceptedAt: new Date("2026-10-08T11:00:00.000Z"),
+          arrivedAtStoreAt: new Date("2026-10-08T11:20:00.000Z"),
+          assignedByAdminUserId: users.adminId,
+          courierId: historicalCourier.id,
+          deliveredAt: new Date("2026-10-08T12:30:00.000Z"),
+          id: assignmentId,
+          onTheWayAt: new Date("2026-10-08T11:50:00.000Z"),
+          orderId,
+          pickedUpAt: new Date("2026-10-08T11:40:00.000Z"),
+          status: CourierAssignmentStatus.DELIVERED,
+        },
+        update: {
+          courierId: historicalCourier.id,
+          requiresAdminAttention: false,
+          status: CourierAssignmentStatus.DELIVERED,
+        },
+        where: { id: assignmentId },
       });
     }
     const demoOrderId = "70000000-0000-4000-8000-000000000001";

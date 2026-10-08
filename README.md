@@ -1,6 +1,6 @@
 # NOZI
 
-NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, transactional purchase flow, seller workspace, and Phase 5 admin control center: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, granular RBAC, searchable catalog, server-side cart, checkout, seller operations, courier assignment, finance ledger, audit logs, health endpoints and structured logging.
+NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, transactional purchase flow, seller workspace, admin control center, and Phase 6 courier delivery workspace: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, granular RBAC, searchable catalog, server-side cart, checkout, seller operations, courier fulfilment, finance ledger, audit logs, health endpoints and structured logging.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the accepted design and delivery plan.
 
@@ -35,7 +35,7 @@ pnpm db:seed
 pnpm db:studio
 ```
 
-The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories, 48 products, seller memberships, 3 couriers, orders in operational states, ledger entries, an internal note and audit history. The seed refuses demo mode in production.
+The seed always creates roles and admin permission definitions. With `ALLOW_DEMO_SEED=true`, it also creates demo accounts and an idempotent Dushanbe marketplace dataset with 5 stores, 6 categories, 48 products, seller memberships, 3 couriers, active and historical courier assignments, orders in operational states, ledger entries, an internal note and audit history. The seed refuses demo mode in production.
 
 Money uses PostgreSQL `numeric(12,2)` and Prisma `Decimal`. The marketplace data-access layer serializes amounts as decimal strings; application code must not calculate money with JavaScript floating-point numbers.
 
@@ -79,11 +79,23 @@ apps/web                    Next.js UI and REST API
 packages/auth               Better Auth, Argon2id and RBAC policies
 packages/config             typed environment validation
 packages/database           Prisma schema, migrations and seed
-packages/marketplace        catalog, checkout, seller/admin services, ledger and state machine
+packages/marketplace        catalog, checkout, seller/admin/courier services, ledger and state machine
 packages/observability      structured logging and request context
 ```
 
-The courier fulfilment interface remains deferred to Phase 6. Phase 5 includes the courier profile and assignment foundation used by admin operations.
+Native mobile applications and continuous GPS streaming remain deferred. The responsive courier workspace uses manual/optional location snapshots and works in the browser.
+
+## Courier routes
+
+| Route                               | Purpose                                      |
+| ----------------------------------- | -------------------------------------------- |
+| `/courier`                          | Active delivery, queue and daily completion  |
+| `/courier/deliveries`               | Paginated active assignments                 |
+| `/courier/deliveries/[orderNumber]` | Fulfilment details, contacts and next action |
+| `/courier/history`                  | Paginated delivered/cancelled history        |
+| `/courier/profile`                  | Courier and operational status               |
+
+Courier APIs are under `/api/v1/courier`. Mutations support accept, arrival, pickup, start, delivery completion, failure reporting and manual location snapshots. Assignment ownership is resolved only from the authenticated courier profile. Delivery completion uses one serializable transaction to consume inventory reservations, update order/assignment/payment, post the CASH collection ledger transaction and return the courier to `AVAILABLE`.
 
 ## Admin routes
 

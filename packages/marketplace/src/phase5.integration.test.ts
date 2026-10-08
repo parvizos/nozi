@@ -90,6 +90,7 @@ async function orderFixture() {
     },
     orderBy: { stockQuantity: "desc" },
     where: {
+      NOT: { slug: { startsWith: "phase6-" } },
       status: ProductStatus.ACTIVE,
       store: {
         isActive: true,

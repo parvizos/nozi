@@ -135,9 +135,19 @@ enum CourierStatus {
 enum CourierAssignmentStatus {
   ASSIGNED
   ACCEPTED
+  ARRIVED_AT_STORE
   PICKED_UP
+  ON_THE_WAY
   DELIVERED
   CANCELLED
+}
+
+enum DeliveryFailureReason {
+  RECIPIENT_UNAVAILABLE
+  WRONG_ADDRESS
+  RECIPIENT_REFUSED
+  CANNOT_CONTACT
+  OTHER
 }
 
 model User {
@@ -783,32 +793,70 @@ model Courier {
 
   user        User                @relation(fields: [userId], references: [id], onDelete: Restrict)
   assignments CourierAssignment[]
+  locations   CourierLocation[]
 
   @@index([status, isActive])
   @@map("couriers")
 }
 
 model CourierAssignment {
-  id                    String                  @id @default(uuid()) @db.Uuid
-  orderId               String                  @map("order_id") @db.Uuid
-  courierId             String                  @map("courier_id") @db.Uuid
-  assignedByAdminUserId String                  @map("assigned_by_admin_user_id") @db.Uuid
-  status                CourierAssignmentStatus @default(ASSIGNED)
-  assignedAt            DateTime                @default(now()) @map("assigned_at") @db.Timestamptz(3)
-  acceptedAt            DateTime?               @map("accepted_at") @db.Timestamptz(3)
-  pickedUpAt            DateTime?               @map("picked_up_at") @db.Timestamptz(3)
-  deliveredAt           DateTime?               @map("delivered_at") @db.Timestamptz(3)
-  cancelledAt           DateTime?               @map("cancelled_at") @db.Timestamptz(3)
-  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                     String                  @id @default(uuid()) @db.Uuid
+  orderId                String                  @map("order_id") @db.Uuid
+  courierId              String                  @map("courier_id") @db.Uuid
+  assignedByAdminUserId  String                  @map("assigned_by_admin_user_id") @db.Uuid
+  status                 CourierAssignmentStatus @default(ASSIGNED)
+  requiresAdminAttention Boolean                 @default(false) @map("requires_admin_attention")
+  assignedAt             DateTime                @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  acceptedAt             DateTime?               @map("accepted_at") @db.Timestamptz(3)
+  arrivedAtStoreAt       DateTime?               @map("arrived_at_store_at") @db.Timestamptz(3)
+  pickedUpAt             DateTime?               @map("picked_up_at") @db.Timestamptz(3)
+  onTheWayAt             DateTime?               @map("on_the_way_at") @db.Timestamptz(3)
+  deliveredAt            DateTime?               @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt            DateTime?               @map("cancelled_at") @db.Timestamptz(3)
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  order      Order   @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  courier    Courier @relation(fields: [courierId], references: [id], onDelete: Restrict)
-  assignedBy User    @relation("CourierAssignmentAdmin", fields: [assignedByAdminUserId], references: [id], onDelete: Restrict)
+  order      Order             @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  courier    Courier           @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  assignedBy User              @relation("CourierAssignmentAdmin", fields: [assignedByAdminUserId], references: [id], onDelete: Restrict)
+  failures   DeliveryFailure[]
+  locations  CourierLocation[]
 
   @@index([orderId, status])
   @@index([courierId, status, assignedAt(sort: Desc)])
   @@map("courier_assignments")
+}
+
+model DeliveryFailure {
+  id           String                @id @default(uuid()) @db.Uuid
+  assignmentId String                @map("assignment_id") @db.Uuid
+  reason       DeliveryFailureReason
+  note         String?               @db.VarChar(500)
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  resolvedAt   DateTime?             @map("resolved_at") @db.Timestamptz(3)
+
+  assignment CourierAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([assignmentId, createdAt(sort: Desc)])
+  @@index([resolvedAt, createdAt(sort: Desc)])
+  @@map("delivery_failures")
+}
+
+model CourierLocation {
+  id           String   @id @default(uuid()) @db.Uuid
+  courierId    String   @map("courier_id") @db.Uuid
+  assignmentId String   @map("assignment_id") @db.Uuid
+  latitude     Decimal  @db.Decimal(9, 6)
+  longitude    Decimal  @db.Decimal(9, 6)
+  accuracy     Decimal? @db.Decimal(8, 2)
+  recordedAt   DateTime @default(now()) @map("recorded_at") @db.Timestamptz(3)
+
+  courier    Courier           @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  assignment CourierAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([courierId, recordedAt(sort: Desc)])
+  @@index([assignmentId, recordedAt(sort: Desc)])
+  @@map("courier_locations")
 }
 
 model AdminNote {

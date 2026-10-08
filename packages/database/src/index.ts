@@ -2,6 +2,7 @@ export {
   CartStatus,
   CourierAssignmentStatus,
   CourierStatus,
+  DeliveryFailureReason,
   InventoryReservationStatus,
   LedgerDirection,
   LedgerOwnerType,

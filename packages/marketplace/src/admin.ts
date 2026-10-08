@@ -40,7 +40,9 @@ type FinanceRange = z.infer<typeof financeRangeSchema>;
 const activeAssignmentStatuses = [
   CourierAssignmentStatus.ASSIGNED,
   CourierAssignmentStatus.ACCEPTED,
+  CourierAssignmentStatus.ARRIVED_AT_STORE,
   CourierAssignmentStatus.PICKED_UP,
+  CourierAssignmentStatus.ON_THE_WAY,
 ];
 
 function assertAdmin(
@@ -139,6 +141,7 @@ export async function getAdminDashboard(actor: ActorContext) {
     preparingOrders,
     assignedOrders,
     onWayOrders,
+    failedDeliveries,
   ] = await Promise.all([
     prisma.order.groupBy({
       _count: true,
@@ -242,6 +245,21 @@ export async function getAdminDashboard(actor: ActorContext) {
       take: 20,
       where: { status: OrderStatus.ON_THE_WAY },
     }),
+    prisma.courierAssignment.findMany({
+      select: {
+        order: {
+          select: {
+            orderNumber: true,
+            store: { select: { name: true } },
+          },
+        },
+      },
+      take: 20,
+      where: {
+        requiresAdminAttention: true,
+        status: { in: activeAssignmentStatuses },
+      },
+    }),
   ]);
   const count = (status: OrderStatus) =>
     statusCounts.find((x) => x.status === status)?._count ?? 0;
@@ -284,6 +302,11 @@ export async function getAdminDashboard(actor: ActorContext) {
         kind: "DELIVERY_DELAY",
         orderNumber: o.orderNumber,
         store: o.store.name,
+      })),
+      ...failedDeliveries.map((assignment) => ({
+        kind: "DELIVERY_FAILED",
+        orderNumber: assignment.order.orderNumber,
+        store: assignment.order.store.name,
       })),
     ],
     metrics: {
@@ -491,12 +514,21 @@ export async function adminCancelOrder(
           },
         );
         if (active.length) {
+          const resolvedAt = new Date();
           await tx.courierAssignment.updateMany({
             data: {
-              cancelledAt: new Date(),
+              cancelledAt: resolvedAt,
+              requiresAdminAttention: false,
               status: CourierAssignmentStatus.CANCELLED,
             },
             where: { id: { in: active.map((a) => a.id) } },
+          });
+          await tx.deliveryFailure.updateMany({
+            data: { resolvedAt },
+            where: {
+              assignmentId: { in: active.map((a) => a.id) },
+              resolvedAt: null,
+            },
           });
           await tx.courier.updateMany({
             data: { status: CourierStatus.AVAILABLE },
@@ -573,12 +605,18 @@ export async function assignCourier(
               "Переназначение недоступно",
               409,
             );
+          const resolvedAt = new Date();
           await tx.courierAssignment.update({
             data: {
-              cancelledAt: new Date(),
+              cancelledAt: resolvedAt,
+              requiresAdminAttention: false,
               status: CourierAssignmentStatus.CANCELLED,
             },
             where: { id: previous.id },
+          });
+          await tx.deliveryFailure.updateMany({
+            data: { resolvedAt },
+            where: { assignmentId: previous.id, resolvedAt: null },
           });
           await tx.courier.update({
             data: { status: CourierStatus.AVAILABLE },

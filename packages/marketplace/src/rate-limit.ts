@@ -58,3 +58,32 @@ export async function consumeAdminMutationRateLimit(
     );
   }
 }
+
+export async function consumeCourierMutationRateLimit(
+  userId: string,
+  action: string,
+  limit = 40,
+): Promise<void> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const bucketStart = new Date((nowSeconds - (nowSeconds % 60)) * 1000);
+  const keyHash = createHash("sha256")
+    .update(`courier:${action}:${userId}`)
+    .digest("hex");
+  const bucket = await prisma.rateLimitBucket.upsert({
+    create: {
+      bucketStart,
+      count: 1,
+      expiresAt: new Date(bucketStart.getTime() + 120_000),
+      keyHash,
+    },
+    update: { count: { increment: 1 } },
+    where: { keyHash_bucketStart: { bucketStart, keyHash } },
+  });
+  if (bucket.count > limit) {
+    throw new MarketplaceError(
+      "CHECKOUT_RATE_LIMITED",
+      "Слишком много операций доставки. Повторите позже",
+      429,
+    );
+  }
+}

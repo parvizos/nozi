@@ -152,3 +152,64 @@ export async function reverseOrderLedger(
     },
   });
 }
+
+export async function postCashCollectionLedger(
+  tx: Tx,
+  input: {
+    amount: Prisma.Decimal;
+    courierId: string;
+    currencyCode: string;
+    orderId: string;
+    userId: string;
+  },
+): Promise<void> {
+  const existing = await tx.ledgerTransaction.count({
+    where: {
+      eventType: "CASH_COLLECTED",
+      referenceId: input.orderId,
+      referenceType: "ORDER",
+    },
+  });
+  if (existing) return;
+  const [cashInTransit, clearing] = await Promise.all([
+    account(tx, {
+      accountType: "CASH_IN_TRANSIT",
+      currencyCode: input.currencyCode,
+      name: "Courier cash in transit",
+      ownerId: input.courierId,
+      ownerType: LedgerOwnerType.COURIER,
+    }),
+    account(tx, {
+      accountType: "PAYMENT_CLEARING",
+      currencyCode: input.currencyCode,
+      name: "Payment clearing",
+      ownerId: null,
+      ownerType: LedgerOwnerType.PLATFORM,
+    }),
+  ]);
+  await tx.ledgerTransaction.create({
+    data: {
+      createdByUserId: input.userId,
+      currencyCode: input.currencyCode,
+      description: "Cash collected by courier on delivery",
+      effectiveAt: new Date(),
+      entries: {
+        create: [
+          {
+            amount: input.amount,
+            direction: LedgerDirection.DEBIT,
+            ledgerAccountId: cashInTransit.id,
+          },
+          {
+            amount: input.amount,
+            direction: LedgerDirection.CREDIT,
+            ledgerAccountId: clearing.id,
+          },
+        ],
+      },
+      eventType: "CASH_COLLECTED",
+      referenceId: input.orderId,
+      referenceType: "ORDER",
+    },
+  });
+}
