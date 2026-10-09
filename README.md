@@ -1,8 +1,8 @@
 # NOZI
 
-NOZI is a production-minded gift marketplace MVP. The repository currently contains the platform foundation, customer marketplace, transactional purchase flow, seller workspace, admin control center, and Phase 6 courier delivery workspace: a Next.js modular monolith, PostgreSQL/Prisma, database-backed authentication, granular RBAC, searchable catalog, server-side cart, checkout, seller operations, courier fulfilment, finance ledger, audit logs, health endpoints and structured logging.
+NOZI is a production-minded gift marketplace MVP. The repository contains a Next.js modular monolith, PostgreSQL/Prisma, phone-first identity, database sessions, granular RBAC, the customer marketplace, transactional purchase flow, seller/admin/courier workspaces, finance ledger, transactional notification outbox, a separate background worker, health endpoints and structured logging.
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md) and [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the accepted design and delivery plan.
+See [ARCHITECTURE.md](./ARCHITECTURE.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md), [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) and [Phase 7 operations](./docs/PHASE_7_OPERATIONS.md) for the accepted design, delivery plan and worker/identity deployment notes.
 
 ## Requirements
 
@@ -20,11 +20,13 @@ pnpm db:generate
 pnpm db:migrate:deploy
 pnpm db:seed
 pnpm dev
+# In a second process:
+pnpm --filter @nozi/worker dev
 ```
 
 Replace `AUTH_SECRET` and `DEMO_USER_PASSWORD` in the local `.env`. Do not commit `.env` files.
 
-The service starts at `http://localhost:3000`. Readiness is available at `/api/v1/health/ready`; liveness is available at `/api/v1/health/live`.
+The web service starts at `http://localhost:3000`. Its readiness is available at `/api/v1/health/ready`; liveness is available at `/api/v1/health/live`. The separate worker defaults to port `3001` and exposes `/health/ready` and `/health/live`.
 
 ## Database
 
@@ -82,10 +84,12 @@ Integration checks require PostgreSQL and the environment variables shown in `.e
 
 ```text
 apps/web                    Next.js UI and REST API
+apps/worker                 outbox, scheduled maintenance and health process
 packages/auth               Better Auth, Argon2id and RBAC policies
 packages/config             typed environment validation
 packages/database           Prisma schema, migrations and seed
 packages/marketplace        catalog, checkout, seller/admin/courier services, ledger and state machine
+packages/notifications      typed templates, providers, outbox and in-app notifications
 packages/observability      structured logging and request context
 ```
 
@@ -120,6 +124,7 @@ Courier APIs are under `/api/v1/courier`. Mutations support accept, arrival, pic
 | `/admin/categories`           | Category creation, hierarchy and activation     |
 | `/admin/finance`              | GMV, settlement components, payments and ledger |
 | `/admin/audit`                | Filtered mutation audit trail                   |
+| `/admin/system`               | Outbox backlog and worker heartbeat             |
 
 Admin mutations are authorized by explicit permission codes in addition to the admin role. Order changes use the centralized state machine. Courier assignment and reassignment use serializable transactions plus a partial unique database index that permits only one active assignment per order.
 
@@ -153,7 +158,11 @@ Seller entity permissions are enforced on the server. Owners and managers can ma
 | `/order/[orderNumber]/success` | Order confirmation                                  |
 | `/orders/[orderNumber]`        | Customer-owned order status and timeline            |
 | `/account/orders`              | Customer order history                              |
-| `/sign-in`                     | Customer sign-in for protected actions              |
+| `/account/security`            | Verified identity and logout                        |
+| `/notifications`               | User-scoped in-app notifications                    |
+| `/sign-in`                     | Phone OTP or internal email sign-in                 |
+| `/sign-up`                     | Phone-first customer registration                   |
+| `/verify`                      | One-time-code verification                          |
 
 ## Customer API
 
@@ -166,4 +175,4 @@ Seller entity permissions are enforced on the server. Owners and managers can ma
 | `DELETE` | `/api/v1/cart/items/[itemId]` | Remove an item                |
 | `POST`   | `/api/v1/checkout/orders`     | Create an idempotent order    |
 
-The checkout endpoint accepts `CASH` and development `TEST` payment methods through the payment provider interface. It never receives or stores card data. Seller rejection releases active inventory reservations once and cancels cash payments or refunds development test payments. Admin and courier workflows remain deferred to their implementation phases.
+The checkout endpoint accepts `CASH` and explicitly enabled non-production `TEST` payments through the payment provider interface. It never receives or stores card data. Seller rejection releases active inventory reservations once and cancels cash payments or refunds development test payments. Order and assignment changes enqueue typed notification events in their domain transaction; the worker delivers them asynchronously with retry and dead-letter handling.

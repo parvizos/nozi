@@ -74,6 +74,33 @@ function checkoutInput(): CheckoutInput {
 }
 
 async function placedOrder(productId: string, variantId: string) {
+  const product = await prisma.product.findUniqueOrThrow({
+    select: { store: { select: { id: true, sellerId: true } } },
+    where: { id: productId },
+  });
+  await prisma.$transaction([
+    prisma.seller.update({
+      data: { status: "APPROVED" },
+      where: { id: product.store.sellerId },
+    }),
+    prisma.store.update({
+      data: {
+        isActive: true,
+        isOpen: true,
+        isTemporarilyPaused: false,
+        status: "ACTIVE",
+      },
+      where: { id: product.store.id },
+    }),
+    prisma.product.update({
+      data: { stockQuantity: 10_000 },
+      where: { id: productId },
+    }),
+    prisma.productVariant.update({
+      data: { stockQuantity: 10_000 },
+      where: { id: variantId },
+    }),
+  ]);
   const customer = await createUser(UserRoleCode.CUSTOMER);
   await addCartItem(customer, {
     productId,
