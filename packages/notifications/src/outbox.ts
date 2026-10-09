@@ -200,6 +200,7 @@ async function processOtp(event: ClaimedEvent, provider: SmsProvider) {
 }
 
 const customerTemplates: Partial<Record<OrderStatus, TemplateName>> = {
+  [OrderStatus.AWAITING_SELLER_CONFIRMATION]: "ORDER_CREATED",
   [OrderStatus.CONFIRMED]: "ORDER_CONFIRMED",
   [OrderStatus.PREPARING]: "ORDER_PREPARING",
   [OrderStatus.COURIER_ASSIGNED]: "COURIER_ASSIGNED",
@@ -248,7 +249,6 @@ async function processOrderStatus(event: ClaimedEvent, provider: SmsProvider) {
           templateInput,
         );
     }
-    return;
   }
   const templateName = customerTemplates[status];
   if (templateName) {

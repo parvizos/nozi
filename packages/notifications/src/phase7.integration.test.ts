@@ -327,6 +327,43 @@ describe.sequential("Phase 7 transactional outbox and notifications", () => {
     expect(provider.messages[1]?.body).toContain("482913");
   });
 
+  it("notifies both the customer and seller when an order is created", async () => {
+    const order = await prisma.order.findFirstOrThrow({
+      include: { store: { include: { seller: { include: { users: true } } } } },
+      where: {
+        status: "AWAITING_SELLER_CONFIRMATION",
+        store: { seller: { users: { some: {} } } },
+      },
+    });
+    const event = await prisma.outboxEvent.create({
+      data: {
+        aggregateId: order.id,
+        aggregateType: "Order",
+        dedupeKey: `new-order-notification-test:${randomUUID()}`,
+        payload: {
+          orderId: order.id,
+          status: "AWAITING_SELLER_CONFIRMATION",
+        },
+        type: "ORDER_STATUS_CHANGED",
+      },
+    });
+    await processOutboxEvent({ ...event, attempts: 1 }, new MockSmsProvider());
+    await expect(
+      prisma.notification.count({
+        where: {
+          type: "ORDER_CREATED",
+          userId: order.customerUserId,
+        },
+      }),
+    ).resolves.toBeGreaterThan(0);
+    const sellerUserIds = order.store.seller.users.map(({ userId }) => userId);
+    await expect(
+      prisma.notification.count({
+        where: { type: "NEW_ORDER_SELLER", userId: { in: sellerUserIds } },
+      }),
+    ).resolves.toBeGreaterThan(0);
+  });
+
   it("retries failures with backoff and reaches dead letter", async () => {
     const event = await prisma.outboxEvent.create({
       data: {

@@ -1,6 +1,7 @@
 export type TemplateInputMap = {
   OTP_CODE: { code: string; expiresMinutes: number };
   NEW_ORDER_SELLER: { amount: string; orderNumber: string };
+  ORDER_CREATED: { orderNumber: string };
   ORDER_CONFIRMED: { orderNumber: string };
   ORDER_PREPARING: { orderNumber: string };
   COURIER_ASSIGNED: { orderNumber: string };
@@ -37,6 +38,12 @@ export function renderTemplate<T extends TemplateName>(
         title: "Новый заказ",
       };
     }
+    case "ORDER_CREATED":
+      return orderTemplate(
+        input as TemplateInputMap["ORDER_CREATED"],
+        "Заказ создан",
+        "Создан заказ",
+      );
     case "ORDER_CONFIRMED":
       return orderTemplate(
         input as TemplateInputMap["ORDER_CONFIRMED"],
@@ -126,6 +133,7 @@ export function renderTemplate<T extends TemplateName>(
 function orderTemplate(
   input:
     | TemplateInputMap["ORDER_CONFIRMED"]
+    | TemplateInputMap["ORDER_CREATED"]
     | TemplateInputMap["ORDER_PREPARING"]
     | TemplateInputMap["COURIER_ASSIGNED"]
     | TemplateInputMap["COURIER_ON_THE_WAY"]
