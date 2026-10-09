@@ -22,7 +22,7 @@ export default async function AdminCustomerPage({
         <div>
           <h1 className="text-4xl font-semibold">{customer.name}</h1>
           <p className="mt-2 text-slate-500">
-            {customer.email} · {customer.phoneE164 ?? "без телефона"} ·{" "}
+            {customer.email} · {customer.phoneNumber ?? "без телефона"} ·{" "}
             {customer.status}
           </p>
         </div>

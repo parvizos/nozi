@@ -24,7 +24,7 @@ function tokenHash(token: string): string {
 export async function createCourierInvitationInTransaction(
   tx: Prisma.TransactionClient,
   input: { courierId: string; createdByUserId: string; requestId?: string },
-): Promise<{ expiresAt: Date; token: string }> {
+): Promise<{ expiresAt: Date; id: string; token: string }> {
   const token = randomBytes(32).toString("base64url");
   const now = new Date();
   const expiresAt = new Date(
@@ -57,7 +57,7 @@ export async function createCourierInvitationInTransaction(
       subjectType: "CourierInvitation",
     },
   });
-  return { expiresAt, token };
+  return { expiresAt, id: invitation.id, token };
 }
 
 export async function resendCourierInvitation(

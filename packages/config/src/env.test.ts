@@ -14,11 +14,35 @@ describe("parseServerEnv", () => {
     expect(parseServerEnv(validEnv)).toMatchObject({
       ALLOW_DEMO_SEED: false,
       ENABLE_TEST_PAYMENTS: false,
+      ENABLE_DEV_OTP_RESPONSE: false,
       LOG_LEVEL: "info",
       NODE_ENV: "test",
       PORT: 3000,
       SESSION_COOKIE_PREFIX: "nozi",
     });
+  });
+
+  it("never permits development OTP responses in production", () => {
+    expect(() =>
+      parseServerEnv({
+        ...validEnv,
+        APP_URL: "https://nozi.example",
+        ENABLE_DEV_OTP_RESPONSE: "true",
+        NODE_ENV: "production",
+      }),
+    ).toThrow("ENABLE_DEV_OTP_RESPONSE must be false in production");
+  });
+
+  it("fails fast when production requires SMS without a real adapter", () => {
+    expect(() =>
+      parseServerEnv({
+        ...validEnv,
+        APP_URL: "https://nozi.example",
+        NODE_ENV: "production",
+        SMS_PROVIDER: "console",
+        SMS_REQUIRED: "true",
+      }),
+    ).toThrow("SMS_PROVIDER=http is required");
   });
 
   it("rejects a short authentication secret", () => {

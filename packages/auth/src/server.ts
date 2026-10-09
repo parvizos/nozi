@@ -1,11 +1,16 @@
+import { createHash } from "node:crypto";
+
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { phoneNumber } from "better-auth/plugins";
 
 import { getEnv } from "@nozi/config";
 import { prisma, UserRoleCode, UserStatus } from "@nozi/database";
 
 import { hashPassword, verifyPassword } from "./password";
+import { onPhoneVerified, verifyAndConsumePhoneOtp } from "./otp";
+import { normalizeTajikPhone } from "./phone";
 
 const env = getEnv();
 
@@ -28,9 +33,10 @@ export const auth = betterAuth({
     database: {
       generateId: "uuid",
     },
-    ipAddress: {
-      ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"],
-    },
+    ipAddress:
+      env.TRUST_PROXY === "cloudflare"
+        ? { ipAddressHeaders: ["cf-connecting-ip"] }
+        : { disableIpTracking: true },
     useSecureCookies: env.NODE_ENV === "production",
   },
   baseURL: env.APP_URL,
@@ -97,6 +103,32 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async (context) => {
+      if (
+        context.path === "/phone-number/send-otp" ||
+        context.path === "/phone-number/request-password-reset" ||
+        context.path === "/phone-number/reset-password"
+      ) {
+        throw new APIError("NOT_FOUND", {
+          message: "Use the NOZI OTP request endpoint",
+        });
+      }
+      if (
+        context.path === "/phone-number/verify" &&
+        context.body &&
+        typeof context.body === "object" &&
+        "phoneNumber" in context.body &&
+        typeof context.body.phoneNumber === "string"
+      ) {
+        try {
+          context.body.phoneNumber = normalizeTajikPhone(
+            context.body.phoneNumber,
+          );
+        } catch {
+          throw new APIError("BAD_REQUEST", {
+            message: "Invalid phone number or verification code",
+          });
+        }
+      }
       if (context.path !== "/sign-in/email") {
         return;
       }
@@ -125,6 +157,35 @@ export const auth = betterAuth({
       }
     }),
   },
+  plugins: [
+    phoneNumber({
+      allowedAttempts: env.OTP_MAX_ATTEMPTS,
+      callbackOnVerification: async ({ phoneNumber: phone, user }) => {
+        await onPhoneVerified({ phone, userId: user.id });
+      },
+      expiresIn: env.OTP_TTL_SECONDS,
+      otpLength: 6,
+      phoneNumberValidator: (phone) => {
+        try {
+          return Promise.resolve(normalizeTajikPhone(phone) === phone);
+        } catch {
+          return Promise.resolve(false);
+        }
+      },
+      sendOTP: async () => {
+        throw new Error("Built-in OTP sending is disabled");
+      },
+      signUpOnVerification: {
+        getTempEmail: (phone) => {
+          const digest = createHash("sha256").update(phone).digest("hex");
+          return `phone-${digest.slice(0, 32)}@identity.nozi.invalid`;
+        },
+        getTempName: () => "Покупатель NOZI",
+      },
+      verifyOTP: ({ code, phoneNumber: phone }) =>
+        verifyAndConsumePhoneOtp({ code, phone }),
+    }),
+  ],
   secret: env.AUTH_SECRET,
   session: {
     cookieCache: {

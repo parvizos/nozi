@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { AuthorizationError } from "@nozi/auth";
+import { AuthorizationError, IdentityError } from "@nozi/auth";
 import { MarketplaceError } from "@nozi/marketplace";
 import type { getRequestContext } from "@nozi/observability";
 import { REQUEST_ID_HEADER } from "@nozi/observability";
@@ -27,6 +27,17 @@ export function apiError(
     logger.warn(
       { code: error.code, statusCode: error.status },
       "request denied",
+    );
+    return apiJson(
+      { code: error.code, message: error.message, requestId },
+      requestId,
+      error.status,
+    );
+  }
+  if (error instanceof IdentityError) {
+    logger.warn(
+      { code: error.code, statusCode: error.status },
+      "identity request rejected",
     );
     return apiJson(
       { code: error.code, message: error.message, requestId },

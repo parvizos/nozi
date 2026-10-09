@@ -245,7 +245,7 @@ export async function getCartCount(actor: ActorContext): Promise<number> {
 export async function getCheckoutCustomerProfile(actor: ActorContext) {
   assertCustomer(actor);
   return prisma.user.findUniqueOrThrow({
-    select: { name: true, phoneE164: true },
+    select: { name: true, phoneNumber: true },
     where: { id: actor.userId },
   });
 }

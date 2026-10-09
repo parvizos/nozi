@@ -56,7 +56,7 @@ export default async function CheckoutPage() {
         <CheckoutForm
           cart={cart}
           defaultName={profile.name}
-          defaultPhone={profile.phoneE164 ?? ""}
+          defaultPhone={profile.phoneNumber ?? ""}
           enableTestPayments={testPaymentsEnabled()}
           minimumDate={todayInDushanbe()}
         />

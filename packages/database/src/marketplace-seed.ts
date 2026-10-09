@@ -743,6 +743,10 @@ export async function seedMarketplace(
       });
     }
     for (const [index, userId] of (users.courierUserIds ?? []).entries()) {
+      await prisma.user.update({
+        data: { phoneNumber: `+99290000770${index}` },
+        where: { id: userId },
+      });
       await prisma.courier.upsert({
         create: {
           id: `80000000-0000-4000-8000-00000000000${index + 1}`,

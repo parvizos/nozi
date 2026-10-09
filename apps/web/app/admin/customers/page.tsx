@@ -39,7 +39,7 @@ export default async function AdminCustomersPage({
               <span>
                 {u.email}
                 <small className="block text-slate-500">
-                  {u.phoneE164 ?? "Нет телефона"}
+                  {u.phoneNumber ?? "Нет телефона"}
                 </small>
               </span>
               <span>{u.status}</span>

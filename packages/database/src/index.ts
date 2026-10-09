@@ -9,6 +9,10 @@ export {
   OrderActorType,
   OrderStatus,
   OrderStatusSource,
+  NotificationChannel,
+  OtpChallengeStatus,
+  OtpPurpose,
+  OutboxStatus,
   PaymentMethod,
   PaymentProviderCode,
   PaymentStatus,
@@ -30,6 +34,7 @@ export type {
   User,
   UserAdminPermission,
   UserRole,
+  OutboxEvent,
 } from "../generated/client/client";
 
 export { prisma } from "./client";

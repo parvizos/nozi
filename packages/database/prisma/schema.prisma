@@ -159,44 +159,76 @@ enum DeliveryFailureReason {
   OTHER
 }
 
+enum OtpPurpose {
+  AUTH
+  COURIER_ACTIVATION
+  ACCOUNT_RECOVERY
+}
+
+enum OtpChallengeStatus {
+  PENDING
+  CONSUMED
+  EXPIRED
+  BLOCKED
+  SUPERSEDED
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD_LETTER
+}
+
+enum NotificationChannel {
+  SMS
+  EMAIL
+  IN_APP
+  WHATSAPP
+  TELEGRAM
+}
+
 model User {
-  id              String     @id @default(uuid()) @db.Uuid
-  name            String     @map("display_name") @db.VarChar(160)
-  email           String     @unique @db.Citext
-  emailVerified   Boolean    @default(false) @map("email_verified")
-  image           String?    @map("image_url")
-  phoneE164       String?    @unique @map("phone_e164") @db.VarChar(20)
-  phoneVerifiedAt DateTime?  @map("phone_verified_at") @db.Timestamptz(3)
-  status          UserStatus @default(ACTIVE)
-  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
-  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(3)
+  id                  String     @id @default(uuid()) @db.Uuid
+  name                String     @map("display_name") @db.VarChar(160)
+  email               String     @unique @db.Citext
+  emailVerified       Boolean    @default(false) @map("email_verified")
+  image               String?    @map("image_url")
+  phoneNumber         String?    @unique @map("phone_e164") @db.VarChar(20)
+  phoneNumberVerified Boolean    @default(false) @map("phone_number_verified")
+  phoneVerifiedAt     DateTime?  @map("phone_verified_at") @db.Timestamptz(3)
+  status              UserStatus @default(ACTIVE)
+  lastLoginAt         DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt           DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt           DateTime?  @map("deleted_at") @db.Timestamptz(3)
 
   accounts               Account[]
   sessions               Session[]
-  roles                  UserRole[]            @relation("AssignedRoles")
-  rolesGranted           UserRole[]            @relation("GrantedRoles")
+  roles                  UserRole[]              @relation("AssignedRoles")
+  rolesGranted           UserRole[]              @relation("GrantedRoles")
   customerProfile        CustomerProfile?
-  adminPermissions       UserAdminPermission[] @relation("AdminPermissionSubjects")
-  adminPermissionsGiven  UserAdminPermission[] @relation("AdminPermissionGranters")
+  adminPermissions       UserAdminPermission[]   @relation("AdminPermissionSubjects")
+  adminPermissionsGiven  UserAdminPermission[]   @relation("AdminPermissionGranters")
   auditLogs              AuditLog[]
-  approvedSellers        Seller[]              @relation("SellerApprover")
+  approvedSellers        Seller[]                @relation("SellerApprover")
   sellerMemberships      SellerUser[]
   favorites              Favorite[]
-  moderatedProducts      Product[]             @relation("ProductModerator")
+  moderatedProducts      Product[]               @relation("ProductModerator")
   carts                  Cart[]
-  orders                 Order[]               @relation("OrderCustomer")
-  orderStatusChanges     OrderStatusHistory[]  @relation("OrderStatusChangedBy")
+  orders                 Order[]                 @relation("OrderCustomer")
+  orderStatusChanges     OrderStatusHistory[]    @relation("OrderStatusChangedBy")
   idempotencyKeys        IdempotencyKey[]
-  ledgerTransactions     LedgerTransaction[]   @relation("LedgerTransactionCreator")
+  ledgerTransactions     LedgerTransaction[]     @relation("LedgerTransactionCreator")
   courierProfile         Courier?
-  courierAssignmentsMade CourierAssignment[]   @relation("CourierAssignmentAdmin")
-  adminNotesAuthored     AdminNote[]           @relation("AdminNoteAuthor")
-  adminNotesCustomer     AdminNote[]           @relation("AdminNoteCustomer")
-  courierInvitationsMade CourierInvitation[]   @relation("CourierInvitationCreator")
+  courierAssignmentsMade CourierAssignment[]     @relation("CourierAssignmentAdmin")
+  adminNotesAuthored     AdminNote[]             @relation("AdminNoteAuthor")
+  adminNotesCustomer     AdminNote[]             @relation("AdminNoteCustomer")
+  courierInvitationsMade CourierInvitation[]     @relation("CourierInvitationCreator")
   commissionChangesMade  CommissionRateHistory[] @relation("CommissionRateChangedBy")
   cashSettlementsMade    CourierCashSettlement[] @relation("CourierCashSettlementCreator")
+  notifications          Notification[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([deletedAt])
@@ -256,12 +288,12 @@ model Seller {
   updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt             DateTime?    @map("deleted_at") @db.Timestamptz(3)
 
-  approvedBy  User?        @relation("SellerApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  users       SellerUser[]
-  stores      Store[]
-  commissions Commission[]
+  approvedBy            User?                   @relation("SellerApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  users                 SellerUser[]
+  stores                Store[]
+  commissions           Commission[]
   commissionRateHistory CommissionRateHistory[]
-  adminNotes  AdminNote[]
+  adminNotes            AdminNote[]
 
   @@index([status, createdAt(sort: Desc)])
   @@index([deletedAt])
@@ -739,6 +771,100 @@ model RateLimitBucket {
   @@map("rate_limit_buckets")
 }
 
+model OtpChallenge {
+  id                String             @id @default(uuid()) @db.Uuid
+  phoneE164         String             @map("phone_e164") @db.VarChar(20)
+  purpose           OtpPurpose
+  codeHash          String             @map("code_hash") @db.Char(64)
+  encryptedCode     String             @map("encrypted_code")
+  status            OtpChallengeStatus @default(PENDING)
+  attemptCount      Int                @default(0) @map("attempt_count")
+  maxAttempts       Int                @default(5) @map("max_attempts")
+  expiresAt         DateTime           @map("expires_at") @db.Timestamptz(3)
+  resendAvailableAt DateTime           @map("resend_available_at") @db.Timestamptz(3)
+  consumedAt        DateTime?          @map("consumed_at") @db.Timestamptz(3)
+  requestIpHash     String?            @map("request_ip_hash") @db.Char(64)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([phoneE164, purpose, status, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
+  @@map("otp_challenges")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  type          String       @db.VarChar(100)
+  aggregateType String       @map("aggregate_type") @db.VarChar(80)
+  aggregateId   String       @map("aggregate_id") @db.VarChar(100)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  maxAttempts   Int          @default(8) @map("max_attempts")
+  availableAt   DateTime     @default(now()) @map("available_at") @db.Timestamptz(3)
+  lockedAt      DateTime?    @map("locked_at") @db.Timestamptz(3)
+  lockedBy      String?      @map("locked_by") @db.VarChar(120)
+  processedAt   DateTime?    @map("processed_at") @db.Timestamptz(3)
+  lastError     String?      @map("last_error") @db.VarChar(500)
+  dedupeKey     String       @unique @map("dedupe_key") @db.VarChar(200)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  deliveryAttempts NotificationDeliveryAttempt[]
+
+  @@index([status, availableAt, createdAt])
+  @@index([aggregateType, aggregateId, createdAt])
+  @@map("outbox_events")
+}
+
+model Notification {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  type         String    @db.VarChar(100)
+  title        String    @db.VarChar(180)
+  body         String    @db.VarChar(500)
+  resourceType String?   @map("resource_type") @db.VarChar(80)
+  resourceId   String?   @map("resource_id") @db.VarChar(100)
+  dedupeKey    String    @unique @map("dedupe_key") @db.VarChar(200)
+  readAt       DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model NotificationDeliveryAttempt {
+  id                String              @id @default(uuid()) @db.Uuid
+  outboxEventId     String              @map("outbox_event_id") @db.Uuid
+  channel           NotificationChannel
+  provider          String              @db.VarChar(60)
+  recipientHash     String?             @map("recipient_hash") @db.Char(64)
+  attemptNumber     Int                 @map("attempt_number")
+  status            String              @db.VarChar(30)
+  providerMessageId String?             @map("provider_message_id") @db.VarChar(160)
+  errorSafe         String?             @map("error_safe") @db.VarChar(500)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  outboxEvent OutboxEvent @relation(fields: [outboxEventId], references: [id], onDelete: Cascade)
+
+  @@unique([outboxEventId, channel, recipientHash, attemptNumber])
+  @@index([outboxEventId, createdAt])
+  @@map("notification_delivery_attempts")
+}
+
+model WorkerHeartbeat {
+  workerId   String   @id @map("worker_id") @db.VarChar(120)
+  status     String   @default("RUNNING") @db.VarChar(30)
+  startedAt  DateTime @map("started_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(3)
+  metadata   Json?
+
+  @@index([lastSeenAt])
+  @@map("worker_heartbeats")
+}
+
 model LedgerAccount {
   id           String          @id @default(uuid()) @db.Uuid
   ownerType    LedgerOwnerType @map("owner_type")
@@ -805,10 +931,10 @@ model Courier {
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  user        User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  assignments CourierAssignment[]
-  locations   CourierLocation[]
-  invitations CourierInvitation[]
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignments     CourierAssignment[]
+  locations       CourierLocation[]
+  invitations     CourierInvitation[]
   cashSettlements CourierCashSettlement[]
 
   @@index([status, isActive])
@@ -868,8 +994,8 @@ model CourierInvitation {
   createdByUserId String    @map("created_by_user_id") @db.Uuid
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  courier  Courier @relation(fields: [courierId], references: [id], onDelete: Restrict)
-  createdBy User   @relation("CourierInvitationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  courier   Courier @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  createdBy User    @relation("CourierInvitationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([courierId, createdAt(sort: Desc)])
   @@index([expiresAt])
@@ -877,16 +1003,16 @@ model CourierInvitation {
 }
 
 model DeliveryProof {
-  id             String    @id @default(uuid()) @db.Uuid
-  orderId        String    @unique @map("order_id") @db.Uuid
-  nonce          String    @db.VarChar(64)
-  codeHash       String    @map("code_hash") @db.Char(64)
-  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
-  attemptCount   Int       @default(0) @map("attempt_count")
-  maxAttempts    Int       @default(5) @map("max_attempts")
-  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz(3)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id           String    @id @default(uuid()) @db.Uuid
+  orderId      String    @unique @map("order_id") @db.Uuid
+  nonce        String    @db.VarChar(64)
+  codeHash     String    @map("code_hash") @db.Char(64)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  attemptCount Int       @default(0) @map("attempt_count")
+  maxAttempts  Int       @default(5) @map("max_attempts")
+  verifiedAt   DateTime? @map("verified_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
@@ -921,8 +1047,8 @@ model CourierCashSettlement {
   createdByUserId String   @map("created_by_user_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  courier  Courier @relation(fields: [courierId], references: [id], onDelete: Restrict)
-  createdBy User   @relation("CourierCashSettlementCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  courier   Courier @relation(fields: [courierId], references: [id], onDelete: Restrict)
+  createdBy User    @relation("CourierCashSettlementCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([courierId, createdAt(sort: Desc)])
   @@map("courier_cash_settlements")

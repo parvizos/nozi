@@ -5,6 +5,7 @@ import {
   DELETE as removeFavorite,
   POST as addFavorite,
 } from "../app/api/v1/favorites/[productId]/route";
+import { POST as requestOtp } from "../app/api/v1/auth/otp/request/route";
 
 const params = Promise.resolve({
   productId: "00000000-0000-4000-8000-000000000001",
@@ -25,5 +26,9 @@ describe("mutation route origin protection", () => {
   it("rejects favorites POST and DELETE before authentication", async () => {
     expect((await addFavorite(untrusted(), { params })).status).toBe(403);
     expect((await removeFavorite(untrusted(), { params })).status).toBe(403);
+  });
+
+  it("rejects OTP requests from an untrusted origin", async () => {
+    expect((await requestOtp(untrusted())).status).toBe(403);
   });
 });
