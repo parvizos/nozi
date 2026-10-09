@@ -6,6 +6,7 @@ import {
 } from "node:crypto";
 
 import { assertPermission, Permission, type ActorContext } from "@nozi/auth";
+import { encryptTransientSecret } from "@nozi/auth";
 import { getEnv } from "@nozi/config";
 import { prisma, type Prisma } from "@nozi/database";
 
@@ -27,11 +28,11 @@ function hashCode(orderId: string, nonce: string, code: string): string {
 export async function issueDeliveryProof(
   tx: Prisma.TransactionClient,
   orderId: string,
-): Promise<void> {
-  if (!getEnv().ENABLE_DELIVERY_CODES) return;
+): Promise<{ encryptedCode: string; proofId: string } | null> {
+  if (!getEnv().ENABLE_DELIVERY_CODES) return null;
   const nonce = randomBytes(24).toString("base64url");
   const code = codeFor(orderId, nonce);
-  await tx.deliveryProof.upsert({
+  const proof = await tx.deliveryProof.upsert({
     create: {
       codeHash: hashCode(orderId, nonce, code),
       expiresAt: new Date(
@@ -53,6 +54,7 @@ export async function issueDeliveryProof(
     },
     where: { orderId },
   });
+  return { encryptedCode: encryptTransientSecret(code), proofId: proof.id };
 }
 
 export async function verifyDeliveryProof(

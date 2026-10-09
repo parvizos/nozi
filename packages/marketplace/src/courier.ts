@@ -15,6 +15,7 @@ import {
   prisma,
 } from "@nozi/database";
 import { getEnv } from "@nozi/config";
+import { enqueueOutboxEvent } from "@nozi/notifications";
 
 import type {
   CourierDeliveryFilter,
@@ -504,7 +505,25 @@ export async function transitionCourierDelivery(
           );
         }
         if (action === "START") {
-          await issueDeliveryProof(tx, assignment.orderId);
+          await enqueueOutboxEvent(tx, {
+            aggregateId: assignment.orderId,
+            aggregateType: "Order",
+            dedupeKey: `recipient.on-the-way:${assignment.orderId}:${assignment.order.version + 1}`,
+            payload: {
+              orderId: assignment.orderId,
+              status: OrderStatus.ON_THE_WAY,
+            },
+            type: "RECIPIENT_ON_THE_WAY",
+          });
+          const proof = await issueDeliveryProof(tx, assignment.orderId);
+          if (proof)
+            await enqueueOutboxEvent(tx, {
+              aggregateId: assignment.orderId,
+              aggregateType: "Order",
+              dedupeKey: `delivery.code:${assignment.orderId}:${assignment.order.version + 1}`,
+              payload: { orderId: assignment.orderId, ...proof },
+              type: "DELIVERY_CODE_CREATED",
+            });
         }
         if (action === "DELIVER") {
           const payment = assignment.order.payment;
@@ -707,6 +726,16 @@ export async function reportCourierDeliveryFailure(
         subjectId: assignment.id,
         subjectType: "CourierAssignment",
       },
+    });
+    await enqueueOutboxEvent(tx, {
+      aggregateId: assignment.orderId,
+      aggregateType: "Order",
+      dedupeKey: `delivery.failed:${failure.id}`,
+      payload: {
+        orderId: assignment.orderId,
+        status: OrderStatus.DELIVERY_FAILED,
+      },
+      type: "DELIVERY_FAILED",
     });
     return failure;
   });

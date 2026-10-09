@@ -1,0 +1,23 @@
+{
+  "name": "@nozi/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nozi/config": "workspace:*",
+    "@nozi/database": "workspace:*",
+    "@nozi/marketplace": "workspace:*",
+    "@nozi/notifications": "workspace:*",
+    "@nozi/observability": "workspace:*",
+    "tsx": "4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1"
+  }
+}

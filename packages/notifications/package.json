@@ -1,5 +1,5 @@
 {
-  "name": "@nozi/marketplace",
+  "name": "@nozi/notifications",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,7 +13,6 @@
     "@nozi/auth": "workspace:*",
     "@nozi/config": "workspace:*",
     "@nozi/database": "workspace:*",
-    "@nozi/notifications": "workspace:*",
-    "zod": "4.6.5"
+    "@nozi/observability": "workspace:*"
   }
 }

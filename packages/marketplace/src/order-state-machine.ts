@@ -10,6 +10,7 @@ import {
   UserRoleCode,
   prisma,
 } from "@nozi/database";
+import { enqueueOutboxEvent } from "@nozi/notifications";
 
 import { MarketplaceError } from "./errors";
 import { reverseOrderLedger } from "./ledger";
@@ -389,6 +390,13 @@ export async function transitionOrderInTransaction(
       subjectId: order.id,
       subjectType: "Order",
     },
+  });
+  await enqueueOutboxEvent(tx, {
+    aggregateId: order.id,
+    aggregateType: "Order",
+    dedupeKey: `order.status:${order.id}:${order.version + 1}:${input.newStatus}`,
+    payload: { orderId: order.id, status: input.newStatus },
+    type: "ORDER_STATUS_CHANGED",
   });
   return tx.order.findUniqueOrThrow({ where: { id: order.id } });
 }

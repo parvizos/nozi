@@ -13,6 +13,7 @@
     "@nozi/config": "workspace:*",
     "@nozi/database": "workspace:*",
     "@nozi/marketplace": "workspace:*",
+    "@nozi/notifications": "workspace:*",
     "@nozi/observability": "workspace:*",
     "better-auth": "1.7.7",
     "next": "16.4.0",

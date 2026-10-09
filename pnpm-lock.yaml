@@ -56,6 +56,9 @@ importers:
       '@nozi/marketplace':
         specifier: workspace:*
         version: link:../../packages/marketplace
+      '@nozi/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@nozi/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -87,6 +90,31 @@ importers:
       tailwindcss:
         specifier: 4.1.18
         version: 4.1.18
+
+  apps/worker:
+    dependencies:
+      '@nozi/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@nozi/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@nozi/marketplace':
+        specifier: workspace:*
+        version: link:../../packages/marketplace
+      '@nozi/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
+      '@nozi/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      tsx:
+        specifier: 4.21.0
+        version: 4.21.0
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
 
   packages/auth:
     dependencies:
@@ -149,9 +177,27 @@ importers:
       '@nozi/database':
         specifier: workspace:*
         version: link:../database
+      '@nozi/notifications':
+        specifier: workspace:*
+        version: link:../notifications
       zod:
         specifier: 4.6.5
         version: 4.6.5
+
+  packages/notifications:
+    dependencies:
+      '@nozi/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@nozi/config':
+        specifier: workspace:*
+        version: link:../config
+      '@nozi/database':
+        specifier: workspace:*
+        version: link:../database
+      '@nozi/observability':
+        specifier: workspace:*
+        version: link:../observability
 
   packages/observability:
     dependencies:

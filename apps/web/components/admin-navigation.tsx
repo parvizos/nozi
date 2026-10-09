@@ -9,6 +9,7 @@ const links = [
   ["/admin/categories", "Категории"],
   ["/admin/finance", "Финансы"],
   ["/admin/audit", "Аудит"],
+  ["/admin/system", "Система"],
 ] as const;
 export function AdminNavigation() {
   return (

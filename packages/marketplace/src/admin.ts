@@ -42,6 +42,7 @@ import { transitionOrderInTransaction } from "./order-state-machine";
 import { consumeAdminMutationRateLimit } from "./rate-limit";
 import { validateDeliverySlot } from "./delivery-slots";
 import { postCourierCashSettlementLedger } from "./ledger";
+import { enqueueOutboxEvent } from "@nozi/notifications";
 import type { z } from "zod";
 
 type PageInput = z.infer<typeof adminPageSchema>;
@@ -450,7 +451,7 @@ export async function getAdminOrder(actor: ActorContext, orderNumber: string) {
           email: true,
           id: true,
           name: true,
-          phoneE164: true,
+          phoneNumber: true,
           status: true,
         },
       },
@@ -551,6 +552,14 @@ export async function adminCancelOrder(
               isActive: true,
             },
           });
+          for (const assignment of active)
+            await enqueueOutboxEvent(tx, {
+              aggregateId: assignment.id,
+              aggregateType: "CourierAssignment",
+              dedupeKey: `courier.assignment_cancelled:${assignment.id}:${transitioned.version}`,
+              payload: { assignmentId: assignment.id },
+              type: "COURIER_ASSIGNMENT_CANCELLED",
+            });
         }
         return transitioned;
       },
@@ -636,6 +645,13 @@ export async function assignCourier(
             data: { status: CourierStatus.AVAILABLE },
             where: { id: previous.courierId },
           });
+          await enqueueOutboxEvent(tx, {
+            aggregateId: previous.id,
+            aggregateType: "CourierAssignment",
+            dedupeKey: `courier.assignment_cancelled:${previous.id}:reassigned`,
+            payload: { assignmentId: previous.id },
+            type: "COURIER_ASSIGNMENT_CANCELLED",
+          });
         } else {
           if (order.status !== OrderStatus.READY_FOR_PICKUP)
             throw new MarketplaceError(
@@ -657,6 +673,13 @@ export async function assignCourier(
             courierId,
             orderId: order.id,
           },
+        });
+        await enqueueOutboxEvent(tx, {
+          aggregateId: assignment.id,
+          aggregateType: "CourierAssignment",
+          dedupeKey: `${reassign ? "courier.reassigned" : "courier.assigned"}:${assignment.id}`,
+          payload: { assignmentId: assignment.id },
+          type: reassign ? "COURIER_REASSIGNED" : "COURIER_ASSIGNED",
         });
         await tx.courier.update({
           data: { status: CourierStatus.BUSY },
@@ -802,6 +825,13 @@ export async function retryFailedDelivery(
           courierId: selected.id,
           orderId: order.id,
         },
+      });
+      await enqueueOutboxEvent(tx, {
+        aggregateId: assignment.id,
+        aggregateType: "CourierAssignment",
+        dedupeKey: `courier.reassigned:${assignment.id}:retry`,
+        payload: { assignmentId: assignment.id },
+        type: "COURIER_REASSIGNED",
       });
       await tx.courier.update({
         data: { status: CourierStatus.BUSY },
@@ -1231,7 +1261,7 @@ export async function listAdminCustomers(
           OR: [
             { email: { contains: input.query, mode: "insensitive" } },
             { name: { contains: input.query, mode: "insensitive" } },
-            { phoneE164: { contains: input.query } },
+            { phoneNumber: { contains: input.query } },
           ],
         }
       : {}),
@@ -1245,7 +1275,7 @@ export async function listAdminCustomers(
         email: true,
         id: true,
         name: true,
-        phoneE164: true,
+        phoneNumber: true,
         status: true,
       },
       skip: (input.page - 1) * input.pageSize,
@@ -1284,7 +1314,7 @@ export async function getAdminCustomer(actor: ActorContext, userId: string) {
         },
         take: 50,
       },
-      phoneE164: true,
+      phoneNumber: true,
       status: true,
     },
     where: {
@@ -1366,7 +1396,7 @@ export async function createCourier(
       data: {
         email: input.email,
         name: input.name,
-        phoneE164: input.phoneE164,
+        phoneNumber: input.phoneE164,
         roles: { create: { createdByUserId: actor.userId, roleId: role.id } },
         status: UserStatus.INVITED,
       },
@@ -1392,6 +1422,13 @@ export async function createCourier(
       courierId: courier.id,
       createdByUserId: actor.userId,
       ...(requestId ? { requestId } : {}),
+    });
+    await enqueueOutboxEvent(tx, {
+      aggregateId: courier.id,
+      aggregateType: "Courier",
+      dedupeKey: `courier.invited:${invitation.id}`,
+      payload: { courierId: courier.id },
+      type: "COURIER_INVITED",
     });
     return {
       ...courier,
