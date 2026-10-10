@@ -76,4 +76,3 @@ FOREIGN KEY ("order_id") REFERENCES "orders"("id") ON DELETE RESTRICT ON UPDATE 
 ALTER TABLE "returned_inventory_dispositions"
 ADD CONSTRAINT "returned_inventory_dispositions_decided_by_user_id_fkey"
 FOREIGN KEY ("decided_by_user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
