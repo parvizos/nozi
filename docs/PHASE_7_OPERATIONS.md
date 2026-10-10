@@ -59,3 +59,11 @@ The SMS and email abstractions are channel-neutral. Phase 7 ships SMS adapters a
 ## Acceptance
 
 `pnpm acceptance:phase7` expects a seeded development database plus a running worker. It verifies a complete COD delivery, delivery-code proof, balanced ledger, in-app notifications, automatic stale-order cancellation and dead-letter handling.
+
+## Test isolation
+
+Run database-free checks with `pnpm test:unit`. Run PostgreSQL checks with
+`pnpm test:integration`; the guarded runner sets `NODE_ENV=test` and
+`ENABLE_TEST_PAYMENTS=true` only for its child processes, applies migrations,
+and clears the dedicated `nozi_test_*` database before every suite. Production
+and development configuration never inherit these test flags.

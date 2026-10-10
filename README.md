@@ -72,13 +72,15 @@ pnpm test
 pnpm build
 ```
 
-Integration tests deliberately refuse arbitrary databases. Create a dedicated
-local database named `nozi_test_*`, then run with `NODE_ENV=test`,
-`ALLOW_TEST_DATABASE=true`, and `TEST_DATABASE_URL` pointing to that local
-database. The guard also rejects the default `nozi` database, PostgreSQL system
-databases, non-loopback hosts, and missing explicit consent.
-
-Integration checks require PostgreSQL and the environment variables shown in `.env.example`.
+`pnpm test:unit` is fast and never connects to PostgreSQL. `pnpm test:integration`
+uses `TEST_DATABASE_URL` or the documented local default
+`postgresql://nozi:nozi_dev_only@127.0.0.1:5432/nozi_test_local`; it applies
+migrations and resets only that guarded database before the suite. Create it
+once with `docker exec nozi-postgres-1 createdb -U nozi nozi_test_local`.
+The runner explicitly enables TEST payments only inside the test process.
+It rejects non-loopback hosts, the development/system databases, a database
+without the `nozi_test_` prefix, and any mismatch between `DATABASE_URL` and
+`TEST_DATABASE_URL`. `pnpm test` runs unit then integration tests.
 
 ## Monorepo
 
