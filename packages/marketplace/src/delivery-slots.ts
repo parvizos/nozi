@@ -28,6 +28,13 @@ function minutes(value: string): number {
   return hour! * 60 + minute!;
 }
 
+export function isSameDayDeliveryWindow(
+  windowStart: string,
+  windowEnd: string,
+): boolean {
+  return minutes(windowEnd) > minutes(windowStart);
+}
+
 function plusDays(date: string, days: number): string {
   const value = new Date(`${date}T00:00:00.000Z`);
   value.setUTCDate(value.getUTCDate() + days);
@@ -92,13 +99,15 @@ export function validateDeliverySlot(input: {
     );
   }
 
+  if (!isSameDayDeliveryWindow(input.windowStart, input.windowEnd)) {
+    throw new MarketplaceError(
+      "DELIVERY_SLOT_UNAVAILABLE",
+      "Окно доставки должно завершаться позже начала в тот же день",
+      422,
+    );
+  }
   const start = dushanbeDateTime(input.date, input.windowStart);
-  const end = dushanbeDateTime(
-    minutes(input.windowEnd) <= minutes(input.windowStart)
-      ? plusDays(input.date, 1)
-      : input.date,
-    input.windowEnd,
-  );
+  const end = dushanbeDateTime(input.date, input.windowEnd);
   const earliest = new Date(
     now.getTime() + Math.max(0, input.preparationMinutes) * 60_000,
   );

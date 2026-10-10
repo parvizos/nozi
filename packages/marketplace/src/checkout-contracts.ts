@@ -15,24 +15,33 @@ const optionalShortText = (max: number) =>
     .optional()
     .transform((value) => value || undefined);
 
-export const checkoutSchema = z.object({
-  anonymousDelivery: z.boolean().default(false),
-  apartment: optionalShortText(40),
-  buyerName: z.string().trim().min(2).max(160),
-  buyerPhone: phoneSchema,
-  customerNote: optionalShortText(500),
-  deliveryAddress: z.string().trim().min(5).max(240),
-  deliveryDate: z.iso.date(),
-  deliveryNote: optionalShortText(500),
-  deliveryWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  deliveryWindowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  entrance: optionalShortText(40),
-  floor: optionalShortText(20),
-  giftMessage: optionalShortText(500),
-  paymentMethod: z.enum(["CASH", "TEST"]),
-  recipientName: z.string().trim().min(2).max(160),
-  recipientPhone: phoneSchema,
-});
+export const checkoutSchema = z
+  .object({
+    anonymousDelivery: z.boolean().default(false),
+    apartment: optionalShortText(40),
+    buyerName: z.string().trim().min(2).max(160),
+    buyerPhone: phoneSchema,
+    customerNote: optionalShortText(500),
+    deliveryAddress: z.string().trim().min(5).max(240),
+    deliveryDate: z.iso.date(),
+    deliveryNote: optionalShortText(500),
+    deliveryWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    deliveryWindowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    entrance: optionalShortText(40),
+    floor: optionalShortText(20),
+    giftMessage: optionalShortText(500),
+    paymentMethod: z.enum(["CASH", "TEST"]),
+    recipientName: z.string().trim().min(2).max(160),
+    recipientPhone: phoneSchema,
+  })
+  .refine(
+    ({ deliveryWindowEnd, deliveryWindowStart }) =>
+      deliveryWindowEnd > deliveryWindowStart,
+    {
+      message: "Окно доставки должно завершаться позже начала в тот же день",
+      path: ["deliveryWindowEnd"],
+    },
+  );
 
 export const idempotencyKeySchema = z
   .string()

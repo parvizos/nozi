@@ -1,4 +1,4 @@
-export const MARKETPLACE_TIME_ZONE = "Asia/Dushanbe";
+export { MARKETPLACE_TIME_ZONE } from "./order-display";
 export const DUSHANBE_UTC_OFFSET_MINUTES = 5 * 60;
 
 export function dushanbeLocalParts(now: Date): {
@@ -27,4 +27,12 @@ export function dushanbeDateTime(date: string, time: string): Date {
 export function dushanbeStartOfDay(now = new Date()): Date {
   const { date } = dushanbeLocalParts(now);
   return dushanbeDateTime(date, "00:00");
+}
+
+export function dushanbeDayRange(now = new Date()): {
+  end: Date;
+  start: Date;
+} {
+  const start = dushanbeStartOfDay(now);
+  return { end: new Date(start.getTime() + 86_400_000), start };
 }

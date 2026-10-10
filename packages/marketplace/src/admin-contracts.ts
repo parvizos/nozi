@@ -13,6 +13,18 @@ export const adminPageSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   query: z.string().trim().max(160).default(""),
 });
+export const adminProductFilterSchema = adminPageSchema.extend({
+  status: z
+    .enum([
+      "ALL",
+      ProductStatus.PENDING_REVIEW,
+      ProductStatus.ACTIVE,
+      ProductStatus.HIDDEN,
+      ProductStatus.REJECTED,
+      ProductStatus.ARCHIVED,
+    ])
+    .default("ALL"),
+});
 export const adminOrderFilterSchema = adminPageSchema.extend({
   courierId: z.string().uuid().optional(),
   from: z.iso.date().optional(),
@@ -26,12 +38,21 @@ export const adminCancelSchema = z.object({
 export const courierAssignmentSchema = z.object({
   courierId: z.string().uuid(),
 });
-export const failedDeliveryRetrySchema = z.object({
-  courierId: z.string().uuid(),
-  deliveryDate: z.iso.date(),
-  deliveryWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-  deliveryWindowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-});
+export const failedDeliveryRetrySchema = z
+  .object({
+    courierId: z.string().uuid(),
+    deliveryDate: z.iso.date(),
+    deliveryWindowEnd: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    deliveryWindowStart: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  })
+  .refine(
+    ({ deliveryWindowEnd, deliveryWindowStart }) =>
+      deliveryWindowEnd > deliveryWindowStart,
+    {
+      message: "Окно доставки должно завершаться позже начала в тот же день",
+      path: ["deliveryWindowEnd"],
+    },
+  );
 export const cashSettlementSchema = z.object({
   amount: z.string().regex(/^\d{1,10}(?:\.\d{1,2})?$/),
   courierId: z.string().uuid(),

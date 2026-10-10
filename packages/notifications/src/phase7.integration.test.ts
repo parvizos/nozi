@@ -153,6 +153,14 @@ describe.sequential("Phase 7 phone identity", () => {
         userId: user.id,
       },
     });
+    const obsoleteSessionToken = randomUUID();
+    await prisma.session.create({
+      data: {
+        expiresAt: new Date(Date.now() + 60_000),
+        token: obsoleteSessionToken,
+        userId: user.id,
+      },
+    });
     await requestPhoneOtp({ clientIp: "127.0.0.5", phone });
     const response = await auth.handler(
       authRequest("/phone-number/verify", {
@@ -167,6 +175,9 @@ describe.sequential("Phase 7 phone identity", () => {
     await expect(
       prisma.courier.findUniqueOrThrow({ where: { userId: user.id } }),
     ).resolves.toMatchObject({ status: "AVAILABLE" });
+    await expect(
+      prisma.session.count({ where: { token: obsoleteSessionToken } }),
+    ).resolves.toBe(0);
 
     const suspendedPhone = uniquePhone();
     const suspended = await prisma.user.create({
@@ -277,7 +288,7 @@ describe.sequential("Phase 7 transactional outbox and notifications", () => {
 
   it("sends recipient on-the-way and delivery-code messages as separate events", async () => {
     const order = await prisma.order.findFirstOrThrow({
-      where: { status: "ON_THE_WAY" },
+      where: { recipientPhoneE164: { not: "" } },
     });
     const proof = await prisma.deliveryProof.upsert({
       create: {
@@ -331,7 +342,6 @@ describe.sequential("Phase 7 transactional outbox and notifications", () => {
     const order = await prisma.order.findFirstOrThrow({
       include: { store: { include: { seller: { include: { users: true } } } } },
       where: {
-        status: "AWAITING_SELLER_CONFIRMATION",
         store: { seller: { users: { some: {} } } },
       },
     });

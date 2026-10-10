@@ -291,6 +291,8 @@ export async function onPhoneVerified(input: {
       user.courierProfile?.status === "SUSPENDED"
     )
       throw new IdentityError("ACCOUNT_INACTIVE", "Аккаунт недоступен", 403);
+    if (user.courierProfile && user.status === UserStatus.INVITED)
+      await tx.session.deleteMany({ where: { userId: user.id } });
     await tx.user.update({
       data: {
         phoneNumberVerified: true,

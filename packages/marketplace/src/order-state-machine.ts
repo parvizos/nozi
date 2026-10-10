@@ -363,9 +363,18 @@ export async function transitionOrderInTransaction(
   } else if (input.newStatus === OrderStatus.DELIVERED) {
     await consumeReservations(tx, order.id);
   } else if (input.newStatus === OrderStatus.RETURNED_TO_STORE) {
-    // Physical stock was not decremented before delivery. Once the parcel is
-    // confirmed back at the store, releasing the reservation makes it sellable.
-    await releaseReservations(tx, order.id);
+    const reservations = await tx.inventoryReservation.findMany({
+      where: { orderId: order.id, status: InventoryReservationStatus.ACTIVE },
+    });
+    if (reservations.length)
+      await tx.returnedInventoryDisposition.createMany({
+        data: reservations.map((reservation) => ({
+          orderId: order.id,
+          quantity: reservation.quantity,
+          reservationId: reservation.id,
+        })),
+        skipDuplicates: true,
+      });
   }
   await tx.orderStatusHistory.create({
     data: {

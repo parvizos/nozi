@@ -13,6 +13,7 @@ import {
   OrderStatus,
   PaymentStatus,
   Prisma,
+  ProductRevisionStatus,
   ProductStatus,
   SellerStatus,
   StoreStatus,
@@ -24,6 +25,7 @@ import {
 import type {
   adminOrderFilterSchema,
   adminPageSchema,
+  adminProductFilterSchema,
   auditFilterSchema,
   categoryCreateSchema,
   categoryUpdateSchema,
@@ -44,8 +46,10 @@ import { validateDeliverySlot } from "./delivery-slots";
 import { postCourierCashSettlementLedger } from "./ledger";
 import { enqueueOutboxEvent } from "@nozi/notifications";
 import type { z } from "zod";
+import { productImageSchema, productVariantSchema } from "./seller-contracts";
 
 type PageInput = z.infer<typeof adminPageSchema>;
+type ProductFilter = z.infer<typeof adminProductFilterSchema>;
 type OrderFilter = z.infer<typeof adminOrderFilterSchema>;
 type AuditFilter = z.infer<typeof auditFilterSchema>;
 type FinanceRange = z.infer<typeof financeRangeSchema>;
@@ -458,6 +462,7 @@ export async function getAdminOrder(actor: ActorContext, orderNumber: string) {
       deliveryAddress: true,
       items: true,
       payment: true,
+      returnDispositions: { orderBy: { createdAt: "asc" } },
       statusHistory: {
         include: { changedBy: { select: { name: true } } },
         orderBy: { createdAt: "asc" },
@@ -881,6 +886,12 @@ export async function startFailedDeliveryReturn(
         "Активное назначение не найдено",
         409,
       );
+    if (!assignment.pickedUpAt)
+      throw new MarketplaceError(
+        "FAILED_DELIVERY_CONFLICT",
+        "Возврат в магазин недоступен: товар ещё не был забран",
+        409,
+      );
     const changed = await tx.courierAssignment.updateMany({
       data: { status: CourierAssignmentStatus.RETURNING_TO_STORE },
       where: {
@@ -1165,21 +1176,40 @@ export async function updateAdminStore(
   });
 }
 
-export async function listAdminProducts(actor: ActorContext, input: PageInput) {
+export async function listAdminProducts(
+  actor: ActorContext,
+  input: ProductFilter,
+) {
   assertAdmin(actor, Permission.ProductsModerate);
-  const where: Prisma.ProductWhereInput = input.query
-    ? {
-        OR: [
-          { name: { contains: input.query, mode: "insensitive" } },
-          { store: { name: { contains: input.query, mode: "insensitive" } } },
-        ],
-      }
-    : {};
+  const and: Prisma.ProductWhereInput[] = [];
+  if (input.query)
+    and.push({
+      OR: [
+        { name: { contains: input.query, mode: "insensitive" } },
+        { store: { name: { contains: input.query, mode: "insensitive" } } },
+      ],
+    });
+  if (input.status === ProductStatus.PENDING_REVIEW)
+    and.push({
+      OR: [
+        { status: ProductStatus.PENDING_REVIEW },
+        {
+          revisions: {
+            some: { status: ProductRevisionStatus.PENDING_REVIEW },
+          },
+        },
+      ],
+    });
+  else if (input.status !== "ALL") and.push({ status: input.status });
+  const where: Prisma.ProductWhereInput = {
+    AND: and,
+  };
   const [items, total] = await Promise.all([
     prisma.product.findMany({
       include: {
         category: { select: { name: true } },
         images: { orderBy: { sortOrder: "asc" }, take: 1 },
+        revisions: { orderBy: { submittedAt: "desc" }, take: 1 },
         store: { select: { name: true } },
       },
       orderBy: { updatedAt: "desc" },
@@ -1204,9 +1234,148 @@ export async function moderateProduct(
 ) {
   assertAdmin(actor, Permission.ProductsModerate);
   return prisma.$transaction(async (tx) => {
-    const current = await tx.product.findUnique({ where: { id: productId } });
+    const current = await tx.product.findUnique({
+      include: { variants: true },
+      where: { id: productId },
+    });
     if (!current)
       throw new MarketplaceError("PRODUCT_UNAVAILABLE", "Товар не найден", 404);
+    const revision = await tx.productRevision.findFirst({
+      orderBy: { submittedAt: "desc" },
+      where: { productId, status: ProductRevisionStatus.PENDING_REVIEW },
+    });
+    if (
+      revision &&
+      (input.status === ProductStatus.ACTIVE ||
+        input.status === ProductStatus.REJECTED)
+    ) {
+      const now = new Date();
+      if (input.status === ProductStatus.REJECTED) {
+        await tx.productRevision.update({
+          data: {
+            rejectionReason: input.note!,
+            reviewedAt: now,
+            reviewedByUserId: actor.userId,
+            status: ProductRevisionStatus.REJECTED,
+          },
+          where: { id: revision.id },
+        });
+        await audit(tx, actor, {
+          action: "product.revision_rejected",
+          after: { revisionStatus: ProductRevisionStatus.REJECTED },
+          before: { revisionStatus: ProductRevisionStatus.PENDING_REVIEW },
+          reason: input.note,
+          requestId,
+          subjectId: productId,
+          subjectType: "Product",
+        });
+        return current;
+      }
+
+      const images = productImageSchema.array().parse(revision.images);
+      const variants = productVariantSchema.array().parse(revision.variants);
+      const duplicateSlug = await tx.product.count({
+        where: { id: { not: productId }, slug: revision.slug },
+      });
+      if (duplicateSlug)
+        throw new MarketplaceError(
+          "PRODUCT_SLUG_CONFLICT",
+          "Такой slug уже используется",
+          409,
+        );
+      const submittedIds = variants.flatMap((variant) => variant.id ?? []);
+      const omitted = current.variants.filter(
+        ({ deletedAt, id }) => !deletedAt && !submittedIds.includes(id),
+      );
+      if (omitted.some(({ reservedQuantity }) => reservedQuantity > 0))
+        throw new MarketplaceError(
+          "INSUFFICIENT_STOCK",
+          "Нельзя удалить зарезервированный вариант",
+          409,
+        );
+      await tx.product.update({
+        data: {
+          categoryId: revision.categoryId,
+          compareAtPrice: revision.compareAtPrice,
+          description: revision.description,
+          moderatedAt: now,
+          moderatedByUserId: actor.userId,
+          moderationNote: null,
+          name: revision.name,
+          price: revision.price,
+          slug: revision.slug,
+          status: ProductStatus.ACTIVE,
+          version: { increment: 1 },
+        },
+        where: { id: productId },
+      });
+      await tx.productImage.deleteMany({ where: { productId } });
+      if (images.length)
+        await tx.productImage.createMany({
+          data: images.map(({ altText, isPrimary, objectKey, sortOrder }) => ({
+            altText,
+            isPrimary,
+            objectKey,
+            productId,
+            sortOrder,
+          })),
+        });
+      if (omitted.length)
+        await tx.productVariant.updateMany({
+          data: { deletedAt: now, isActive: false },
+          where: { id: { in: omitted.map(({ id }) => id) } },
+        });
+      for (const variant of variants) {
+        const existing = variant.id
+          ? current.variants.find(({ id }) => id === variant.id)
+          : null;
+        if (existing) {
+          await tx.productVariant.update({
+            data: {
+              absolutePrice: variant.absolutePrice ?? null,
+              deletedAt: null,
+              name: variant.name,
+              priceDelta: variant.priceDelta,
+              sku: variant.sku ?? null,
+              sortOrder: variant.sortOrder,
+              version: { increment: 1 },
+            },
+            where: { id: existing.id },
+          });
+        } else {
+          await tx.productVariant.create({
+            data: {
+              absolutePrice: variant.absolutePrice ?? null,
+              isActive: variant.isActive,
+              name: variant.name,
+              priceDelta: variant.priceDelta,
+              productId,
+              sku: variant.sku ?? null,
+              sortOrder: variant.sortOrder,
+              stockQuantity: variant.stockQuantity,
+            },
+          });
+        }
+      }
+      await tx.productRevision.update({
+        data: {
+          rejectionReason: null,
+          reviewedAt: now,
+          reviewedByUserId: actor.userId,
+          status: ProductRevisionStatus.APPROVED,
+        },
+        where: { id: revision.id },
+      });
+      await audit(tx, actor, {
+        action: "product.revision_approved",
+        after: { revisionStatus: ProductRevisionStatus.APPROVED },
+        before: { revisionStatus: ProductRevisionStatus.PENDING_REVIEW },
+        requestId,
+        subjectId: productId,
+        subjectType: "Product",
+      });
+      return tx.product.findUniqueOrThrow({ where: { id: productId } });
+    }
     const allowedModeration: Record<ProductStatus, readonly ProductStatus[]> = {
       [ProductStatus.DRAFT]: [ProductStatus.ARCHIVED],
       [ProductStatus.PENDING_REVIEW]: [
@@ -1657,43 +1826,55 @@ export async function getFinanceOverview(
 export async function getCourierCashBalances(actor: ActorContext) {
   assertAdmin(actor, Permission.FinanceRead);
   const accounts = await prisma.ledgerAccount.findMany({
-    include: {
-      entries: { select: { amount: true, direction: true } },
-    },
+    select: { currencyCode: true, id: true, ownerId: true },
     where: {
       accountType: "CASH_IN_TRANSIT",
       ownerType: "COURIER",
     },
   });
-  return Promise.all(
-    accounts.map(async (account) => {
-      const outstanding = account.entries.reduce(
+  const accountIds = accounts.map(({ id }) => id);
+  const courierIds = accounts.flatMap(({ ownerId }) => ownerId ?? []);
+  const [totals, couriers, settlements] = await Promise.all([
+    prisma.ledgerEntry.groupBy({
+      _sum: { amount: true },
+      by: ["ledgerAccountId", "direction"],
+      where: { ledgerAccountId: { in: accountIds } },
+    }),
+    prisma.courier.findMany({
+      select: { id: true, name: true },
+      where: { id: { in: courierIds } },
+    }),
+    prisma.courierCashSettlement.findMany({
+      distinct: ["courierId"],
+      orderBy: [{ courierId: "asc" }, { createdAt: "desc" }],
+      where: { courierId: { in: courierIds } },
+    }),
+  ]);
+  const courierById = new Map(couriers.map((courier) => [courier.id, courier]));
+  const settlementByCourier = new Map(
+    settlements.map((settlement) => [settlement.courierId, settlement]),
+  );
+  return accounts.map((account) => {
+    const outstanding = totals
+      .filter(({ ledgerAccountId }) => ledgerAccountId === account.id)
+      .reduce(
         (sum, entry) =>
           entry.direction === LedgerDirection.DEBIT
-            ? sum.add(entry.amount)
-            : sum.sub(entry.amount),
+            ? sum.add(entry._sum.amount ?? 0)
+            : sum.sub(entry._sum.amount ?? 0),
         new Prisma.Decimal(0),
       );
-      const courier = account.ownerId
-        ? await prisma.courier.findUnique({
-            select: { id: true, name: true },
-            where: { id: account.ownerId },
-          })
-        : null;
-      const lastSettlement = account.ownerId
-        ? await prisma.courierCashSettlement.findFirst({
-            orderBy: { createdAt: "desc" },
-            where: { courierId: account.ownerId },
-          })
-        : null;
-      return {
-        courier,
-        currencyCode: account.currencyCode,
-        lastSettlement,
-        outstanding: outstanding.toFixed(2),
-      };
-    }),
-  );
+    return {
+      courier: account.ownerId
+        ? (courierById.get(account.ownerId) ?? null)
+        : null,
+      currencyCode: account.currencyCode,
+      lastSettlement: account.ownerId
+        ? (settlementByCourier.get(account.ownerId) ?? null)
+        : null,
+      outstanding: outstanding.toFixed(2),
+    };
+  });
 }
 
 export async function recordCourierCashSettlement(

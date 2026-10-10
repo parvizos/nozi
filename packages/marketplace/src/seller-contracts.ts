@@ -56,7 +56,7 @@ export const sellerOrderActionSchema = z.object({
   expectedVersion: z.number().int().positive().optional(),
 });
 
-const productVariantSchema = z.object({
+export const productVariantSchema = z.object({
   absolutePrice: optionalMoney.optional(),
   id: z.string().uuid().optional(),
   isActive: z.boolean().default(true),
@@ -67,7 +67,7 @@ const productVariantSchema = z.object({
   stockQuantity: z.number().int().min(0).max(1_000_000),
 });
 
-const productImageSchema = z.object({
+export const productImageSchema = z.object({
   altText: z.string().trim().min(1).max(240),
   id: z.string().uuid().optional(),
   isPrimary: z.boolean().default(false),

@@ -18,6 +18,8 @@ export {
   PaymentStatus,
   Prisma,
   ProductStatus,
+  ProductRevisionStatus,
+  ReturnedInventoryDecision,
   SellerStatus,
   SellerUserRole,
   StoreStatus,

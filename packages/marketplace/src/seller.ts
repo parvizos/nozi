@@ -1,5 +1,11 @@
 import { AuthorizationError, type ActorContext } from "@nozi/auth";
-import { OrderStatus, Prisma, ProductStatus, prisma } from "@nozi/database";
+import {
+  OrderStatus,
+  Prisma,
+  ProductRevisionStatus,
+  ProductStatus,
+  prisma,
+} from "@nozi/database";
 
 import { MarketplaceError } from "./errors";
 import {
@@ -15,6 +21,7 @@ import type {
 } from "./seller-contracts";
 import { transitionOrder } from "./order-state-machine";
 import { DevelopmentObjectStorageProvider } from "./storage";
+import { dushanbeDayRange } from "./timezone";
 
 const objectStorage = new DevelopmentObjectStorageProvider();
 
@@ -36,17 +43,92 @@ function money(value: Prisma.Decimal): string {
   return value.toFixed(2);
 }
 
-function dushanbeDayRange(now = new Date()): { end: Date; start: Date } {
-  const shifted = new Date(now.getTime() + 5 * 60 * 60 * 1000);
-  const start = new Date(
-    Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth(),
-      shifted.getUTCDate(),
-    ) -
-      5 * 60 * 60 * 1000,
-  );
-  return { end: new Date(start.getTime() + 86_400_000), start };
+function revisionStatus(
+  status: SellerProductInput["status"],
+): ProductRevisionStatus {
+  return status === ProductStatus.PENDING_REVIEW
+    ? ProductRevisionStatus.PENDING_REVIEW
+    : ProductRevisionStatus.DRAFT;
+}
+
+function sensitiveProductSnapshot(input: SellerProductInput) {
+  return {
+    categoryId: input.categoryId,
+    compareAtPrice: input.compareAtPrice ?? null,
+    description: input.description,
+    images: input.images.map(
+      ({ altText, isPrimary, objectKey, sortOrder }) => ({
+        altText,
+        isPrimary,
+        objectKey,
+        sortOrder,
+      }),
+    ),
+    name: input.name,
+    price: input.price,
+    slug: input.slug,
+    variants: input.variants.map(
+      ({ absolutePrice, id, name, priceDelta, sku, sortOrder }) => ({
+        absolutePrice: absolutePrice ?? null,
+        id: id ?? null,
+        name,
+        priceDelta,
+        sku: sku ?? null,
+        sortOrder,
+      }),
+    ),
+  };
+}
+
+function currentSensitiveSnapshot(current: {
+  categoryId: string;
+  compareAtPrice: Prisma.Decimal | null;
+  description: string;
+  images: {
+    altText: string;
+    isPrimary: boolean;
+    objectKey: string;
+    sortOrder: number;
+  }[];
+  name: string;
+  price: Prisma.Decimal;
+  slug: string;
+  variants: {
+    absolutePrice: Prisma.Decimal | null;
+    deletedAt: Date | null;
+    id: string;
+    name: string;
+    priceDelta: Prisma.Decimal;
+    sku: string | null;
+    sortOrder: number;
+  }[];
+}) {
+  return {
+    categoryId: current.categoryId,
+    compareAtPrice: current.compareAtPrice?.toFixed(2) ?? null,
+    description: current.description,
+    images: current.images.map(
+      ({ altText, isPrimary, objectKey, sortOrder }) => ({
+        altText,
+        isPrimary,
+        objectKey,
+        sortOrder,
+      }),
+    ),
+    name: current.name,
+    price: current.price.toFixed(2),
+    slug: current.slug,
+    variants: current.variants
+      .filter(({ deletedAt }) => !deletedAt)
+      .map(({ absolutePrice, id, name, priceDelta, sku, sortOrder }) => ({
+        absolutePrice: absolutePrice?.toFixed(2) ?? null,
+        id,
+        name,
+        priceDelta: priceDelta.toFixed(2),
+        sku,
+        sortOrder,
+      })),
+  };
 }
 
 async function audit(
@@ -241,6 +323,7 @@ export async function getSellerOrder(actor: ActorContext, orderNumber: string) {
     include: {
       deliveryAddress: true,
       items: { orderBy: { createdAt: "asc" } },
+      returnDispositions: { orderBy: { createdAt: "asc" } },
       statusHistory: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
       store: { select: { id: true, name: true, phoneE164: true } },
     },
@@ -357,6 +440,11 @@ export async function listSellerProducts(
         name: true,
         price: true,
         reservedQuantity: true,
+        revisions: {
+          orderBy: { submittedAt: "desc" },
+          select: { rejectionReason: true, status: true },
+          take: 1,
+        },
         status: true,
         stockQuantity: true,
         store: { select: { id: true, name: true } },
@@ -385,6 +473,10 @@ export async function getSellerProduct(actor: ActorContext, productId: string) {
   const product = await prisma.product.findUnique({
     include: {
       images: { orderBy: { sortOrder: "asc" } },
+      revisions: {
+        orderBy: { submittedAt: "desc" },
+        take: 1,
+      },
       variants: { orderBy: { sortOrder: "asc" } },
     },
     where: { id: productId },
@@ -398,6 +490,23 @@ export async function getSellerProduct(actor: ActorContext, productId: string) {
       ? money(product.compareAtPrice)
       : null,
     price: money(product.price),
+    latestRevision: product.revisions[0]
+      ? {
+          categoryId: product.revisions[0].categoryId,
+          compareAtPrice: product.revisions[0].compareAtPrice
+            ? money(product.revisions[0].compareAtPrice)
+            : null,
+          description: product.revisions[0].description,
+          id: product.revisions[0].id,
+          images: product.revisions[0].images,
+          name: product.revisions[0].name,
+          price: money(product.revisions[0].price),
+          rejectionReason: product.revisions[0].rejectionReason,
+          slug: product.revisions[0].slug,
+          status: product.revisions[0].status,
+          variants: product.revisions[0].variants,
+        }
+      : null,
     variants: product.variants.map((variant) => ({
       ...variant,
       absolutePrice: variant.absolutePrice
@@ -496,7 +605,10 @@ export async function updateSellerProduct(
   validateImageMetadata(input.images);
   return prisma.$transaction(async (tx) => {
     const current = await tx.product.findUnique({
-      include: { variants: true },
+      include: {
+        images: { orderBy: { sortOrder: "asc" } },
+        variants: { orderBy: { sortOrder: "asc" } },
+      },
       where: { id: productId },
     });
     if (!current)
@@ -538,6 +650,102 @@ export async function updateSellerProduct(
       }
     }
     const expectedVersion = input.version ?? current.version;
+
+    if (
+      current.status === ProductStatus.ACTIVE ||
+      current.status === ProductStatus.HIDDEN
+    ) {
+      if (input.storeId !== current.storeId) {
+        throw new MarketplaceError(
+          "PRODUCT_MODERATION_CONFLICT",
+          "Опубликованный товар нельзя переносить между магазинами",
+          409,
+        );
+      }
+      const sensitive = sensitiveProductSnapshot(input);
+      const hasSensitiveChanges =
+        JSON.stringify(sensitive) !==
+        JSON.stringify(currentSensitiveSnapshot(current));
+      const updated = await tx.product.updateMany({
+        data: {
+          preparationTimeMinutes: input.preparationTimeMinutes,
+          stockQuantity: input.stockQuantity,
+          version: { increment: 1 },
+        },
+        where: { id: productId, version: expectedVersion },
+      });
+      if (updated.count !== 1)
+        throw new MarketplaceError(
+          "VERSION_CONFLICT",
+          "Товар уже изменён",
+          409,
+        );
+
+      for (const variant of input.variants) {
+        if (!variant.id) continue;
+        await tx.productVariant.update({
+          data: {
+            isActive: variant.isActive,
+            stockQuantity: variant.stockQuantity,
+            version: { increment: 1 },
+          },
+          where: { id: variant.id },
+        });
+      }
+
+      let revisionId: string | null = null;
+      if (hasSensitiveChanges) {
+        await tx.productRevision.updateMany({
+          data: { status: ProductRevisionStatus.SUPERSEDED },
+          where: {
+            productId,
+            status: {
+              in: [
+                ProductRevisionStatus.DRAFT,
+                ProductRevisionStatus.PENDING_REVIEW,
+                ProductRevisionStatus.REJECTED,
+              ],
+            },
+          },
+        });
+        const revision = await tx.productRevision.create({
+          data: {
+            categoryId: input.categoryId,
+            compareAtPrice: input.compareAtPrice ?? null,
+            description: input.description,
+            images: input.images as unknown as Prisma.InputJsonValue,
+            name: input.name,
+            price: input.price,
+            productId,
+            slug: input.slug,
+            status: revisionStatus(input.status),
+            submittedByUserId: actor.userId,
+            variants: input.variants as unknown as Prisma.InputJsonValue,
+          },
+        });
+        revisionId = revision.id;
+      }
+      await audit(tx, actor, {
+        action: hasSensitiveChanges
+          ? "product.revision_submitted"
+          : "product.operational_updated",
+        after: {
+          liveStatus: current.status,
+          revisionId,
+          revisionStatus: hasSensitiveChanges ? input.status : null,
+          stockQuantity: input.stockQuantity,
+        },
+        before: {
+          liveStatus: current.status,
+          stockQuantity: current.stockQuantity,
+        },
+        requestId,
+        subjectId: productId,
+        subjectType: "Product",
+      });
+      return tx.product.findUniqueOrThrow({ where: { id: productId } });
+    }
+
     const updated = await tx.product.updateMany({
       data: {
         categoryId: input.categoryId,
@@ -548,6 +756,9 @@ export async function updateSellerProduct(
         price: input.price,
         slug: input.slug,
         status: input.status,
+        moderatedAt: null,
+        moderatedByUserId: null,
+        moderationNote: null,
         stockQuantity: input.stockQuantity,
         storeId: input.storeId,
         version: { increment: 1 },

@@ -86,7 +86,7 @@ describe("DeliverySlotService", () => {
     ).toThrow();
   });
 
-  it("supports opening and delivery windows that cross midnight", () => {
+  it("rejects cross-midnight and zero-length delivery windows", () => {
     const overnight = {
       ...store,
       openingHours: hours.map((hour) => ({
@@ -104,6 +104,16 @@ describe("DeliverySlotService", () => {
         windowStart: "23:30",
         windowEnd: "01:00",
       }),
-    ).not.toThrow();
+    ).toThrowError(/тот же день/);
+    expect(() =>
+      validateDeliverySlot({
+        date: "2026-10-08",
+        now,
+        preparationMinutes: 0,
+        store: overnight,
+        windowStart: "10:00",
+        windowEnd: "10:00",
+      }),
+    ).toThrowError(/тот же день/);
   });
 });

@@ -129,6 +129,7 @@ export {
   adminNoteSchema,
   adminOrderFilterSchema,
   adminPageSchema,
+  adminProductFilterSchema,
   auditFilterSchema,
   categoryCreateSchema,
   categoryUpdateSchema,
@@ -148,6 +149,10 @@ export {
   overrideDeliveryProof,
 } from "./delivery-proof";
 export { DevelopmentObjectStorageProvider } from "./storage";
+export {
+  decideReturnedInventory,
+  returnedInventoryDecisionSchema,
+} from "./returned-inventory";
 export type { ObjectMetadata, ObjectStorageProvider } from "./storage";
 export type {
   PaymentIntentInput,

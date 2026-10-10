@@ -287,11 +287,21 @@ describe.sequential("Phase 6.5 courier and security hardening", () => {
       status: CourierStatus.OFFLINE,
     });
     const oldToken = created.activationUrl!.split("/").pop()!;
+    await prisma.session.create({
+      data: {
+        expiresAt: new Date(Date.now() + 60_000),
+        token: randomUUID(),
+        userId: created.userId,
+      },
+    });
     const replacement = await resendCourierInvitation(
       admin,
       created.id,
       randomUUID(),
     );
+    await expect(
+      prisma.session.count({ where: { userId: created.userId } }),
+    ).resolves.toBe(0);
     await expect(
       activateCourier(oldToken, { password: "PilotCourierSecure123" }),
     ).rejects.toMatchObject({ code: "COURIER_INVITATION_USED" });
@@ -423,9 +433,12 @@ describe.sequential("Phase 6.5 courier and security hardening", () => {
     const product = await prisma.product.findFirstOrThrow({
       include: {
         store: { select: { cityId: true } },
-        variants: { take: 1, where: { isActive: true } },
+        variants: {
+          take: 1,
+          where: { isActive: true, stockQuantity: { gt: 0 } },
+        },
       },
-      where: { status: ProductStatus.ACTIVE },
+      where: { status: ProductStatus.ACTIVE, stockQuantity: { gt: 0 } },
     });
     const variant = product.variants[0];
     const order = await prisma.$transaction(async (tx) => {

@@ -30,6 +30,11 @@ export async function createCourierInvitationInTransaction(
   const expiresAt = new Date(
     now.getTime() + getEnv().COURIER_INVITATION_TTL_HOURS * 60 * 60_000,
   );
+  const courier = await tx.courier.findUniqueOrThrow({
+    select: { userId: true },
+    where: { id: input.courierId },
+  });
+  await tx.session.deleteMany({ where: { userId: courier.userId } });
   await tx.courierInvitation.updateMany({
     data: { invalidatedAt: now },
     where: {
@@ -161,6 +166,9 @@ export async function activateCourier(
             providerId: "credential",
           },
         },
+      });
+      await tx.session.deleteMany({
+        where: { userId: invitation.courier.userId },
       });
       await tx.user.update({
         data: { emailVerified: true, status: UserStatus.ACTIVE },

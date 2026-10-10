@@ -391,8 +391,34 @@ describe.sequential("transactional checkout", () => {
 
     const customerView = await getCustomerOrder(owner, result.orderNumber);
     expect(customerView).toMatchObject({ orderNumber: result.orderNumber });
-    expect(JSON.stringify(customerView)).not.toMatch(
-      /customerUserId|changedByUserId|adminNotes|"orderId"/,
+    const serialized = JSON.stringify(customerView);
+    expect(serialized).not.toMatch(
+      /customerUserId|changedByUserId|adminNotes|actorType|source|cancellationNote|"orderId"/,
+    );
+    expect(Object.keys(customerView).sort()).toEqual(
+      [
+        "anonymousDelivery",
+        "createdAt",
+        "currencyCode",
+        "deliveryAddress",
+        "deliveryFee",
+        "discountTotal",
+        "giftMessage",
+        "grandTotal",
+        "items",
+        "itemsSubtotal",
+        "orderNumber",
+        "payment",
+        "recipientName",
+        "recipientPhoneE164",
+        "requestedDeliveryDate",
+        "requestedDeliveryWindowEnd",
+        "requestedDeliveryWindowStart",
+        "status",
+        "statusHistory",
+        "store",
+        "updatedAt",
+      ].sort(),
     );
     await expect(
       getCustomerOrder(stranger, result.orderNumber),

@@ -28,55 +28,40 @@ function assertCustomer(actor: ActorContext): void {
 }
 
 function serializeOrder(order: OrderRecord) {
-  const {
-    cityId: _cityId,
-    customerUserId: _customerUserId,
-    storeId: _storeId,
-    version: _version,
-    ...safeOrder
-  } = order;
-  void _cityId;
-  void _customerUserId;
-  void _storeId;
-  void _version;
-  const deliveryAddress = order.deliveryAddress
-    ? (({ orderId: _orderId, ...address }) => {
-        void _orderId;
-        return address;
-      })(order.deliveryAddress)
-    : null;
   return {
-    ...safeOrder,
+    anonymousDelivery: order.anonymousDelivery,
     createdAt: order.createdAt.toISOString(),
-    deliveryAddress: deliveryAddress
+    currencyCode: order.currencyCode,
+    deliveryAddress: order.deliveryAddress
       ? {
-          ...deliveryAddress,
-          createdAt: deliveryAddress.createdAt.toISOString(),
-          latitude: deliveryAddress.latitude?.toFixed(6) ?? null,
-          longitude: deliveryAddress.longitude?.toFixed(6) ?? null,
+          apartment: order.deliveryAddress.apartment,
+          cityName: order.deliveryAddress.cityName,
+          countryCode: order.deliveryAddress.countryCode,
+          deliveryNote: order.deliveryAddress.deliveryNote,
+          entrance: order.deliveryAddress.entrance,
+          floor: order.deliveryAddress.floor,
+          latitude: order.deliveryAddress.latitude?.toFixed(6) ?? null,
+          line1: order.deliveryAddress.line1,
+          longitude: order.deliveryAddress.longitude?.toFixed(6) ?? null,
         }
       : null,
     deliveryFee: order.deliveryFee.toFixed(2),
     discountTotal: order.discountTotal.toFixed(2),
+    giftMessage: order.giftMessage,
     grandTotal: order.grandTotal.toFixed(2),
-    items: order.items.map((item) => {
-      const {
-        orderId: _orderId,
-        productId: _productId,
-        productVariantId: _variantId,
-        ...safeItem
-      } = item;
-      void _orderId;
-      void _productId;
-      void _variantId;
-      return {
-        ...safeItem,
-        createdAt: safeItem.createdAt.toISOString(),
-        lineTotal: safeItem.lineTotal.toFixed(2),
-        unitPrice: safeItem.unitPrice.toFixed(2),
-      };
-    }),
+    items: order.items.map((item) => ({
+      currencyCode: item.currencyCode,
+      id: item.id,
+      imageObjectKey: item.imageObjectKey,
+      lineTotal: item.lineTotal.toFixed(2),
+      productName: item.productName,
+      quantity: item.quantity,
+      sku: item.sku,
+      unitPrice: item.unitPrice.toFixed(2),
+      variantName: item.variantName,
+    })),
     itemsSubtotal: order.itemsSubtotal.toFixed(2),
+    orderNumber: order.orderNumber,
     payment: order.payment
       ? {
           method: order.payment.method,
@@ -92,19 +77,21 @@ function serializeOrder(order: OrderRecord) {
     requestedDeliveryWindowStart: order.requestedDeliveryWindowStart
       .toISOString()
       .slice(11, 16),
-    statusHistory: order.statusHistory.map((historyEntry) => {
-      const {
-        changedByUserId: _actorId,
-        orderId: _orderId,
-        ...entry
-      } = historyEntry;
-      void _actorId;
-      void _orderId;
-      return {
-        ...entry,
-        createdAt: entry.createdAt.toISOString(),
-      };
-    }),
+    recipientName: order.recipientName,
+    recipientPhoneE164: order.recipientPhoneE164,
+    status: order.status,
+    statusHistory: order.statusHistory.map((entry) => ({
+      createdAt: entry.createdAt.toISOString(),
+      id: entry.id,
+      newStatus: entry.newStatus,
+      previousStatus: entry.previousStatus,
+    })),
+    store: {
+      logoObjectKey: order.store.logoObjectKey,
+      name: order.store.name,
+      phoneE164: order.store.phoneE164,
+      slug: order.store.slug,
+    },
     updatedAt: order.updatedAt.toISOString(),
   };
 }

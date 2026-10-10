@@ -27,6 +27,7 @@ import { postCashCollectionLedger } from "./ledger";
 import { issueDeliveryProof, verifyDeliveryProof } from "./delivery-proof";
 import { transitionOrderInTransaction } from "./order-state-machine";
 import { consumeCourierMutationRateLimit } from "./rate-limit";
+import { dushanbeStartOfDay } from "./timezone";
 
 export const activeCourierAssignmentStatuses = [
   CourierAssignmentStatus.ASSIGNED,
@@ -44,7 +45,6 @@ export type CourierDeliveryAction =
   | "PICKUP"
   | "START"
   | "DELIVER"
-  | "RETURN"
   | "RETURNED";
 
 const actionConfig = {
@@ -83,13 +83,6 @@ const actionConfig = {
     orderStatus: OrderStatus.DELIVERED,
     timestamp: "deliveredAt",
   },
-  RETURN: {
-    auditAction: "courier.return_started",
-    expectedAssignment: CourierAssignmentStatus.DELIVERY_FAILED,
-    nextAssignment: CourierAssignmentStatus.RETURNING_TO_STORE,
-    orderStatus: OrderStatus.RETURNING_TO_STORE,
-    timestamp: "updatedAt",
-  },
   RETURNED: {
     auditAction: "courier.return_completed",
     expectedAssignment: CourierAssignmentStatus.RETURNING_TO_STORE,
@@ -121,14 +114,6 @@ function isConcurrencyError(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     ["P2002", "P2034"].includes(String(error.code))
-  );
-}
-
-function dushanbeStartOfDay(now = new Date()): Date {
-  const local = new Date(now.getTime() + 5 * 60 * 60_000);
-  return new Date(
-    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) -
-      5 * 60 * 60_000,
   );
 }
 

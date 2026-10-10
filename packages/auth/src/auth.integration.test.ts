@@ -6,7 +6,7 @@ import { prisma, UserRoleCode, UserStatus } from "@nozi/database";
 
 import { buildActorContext, Permission } from "./rbac";
 import { auth } from "./server";
-import { setUserStatus } from "./user-status";
+import { setAdminUserStatus, setUserStatus } from "./user-status";
 
 const createdEmails: string[] = [];
 const auditSubjectIds: string[] = [];
@@ -35,12 +35,13 @@ function cookiesFrom(response: Response): string {
 
 beforeAll(async () => {
   await Promise.all(
-    [UserRoleCode.CUSTOMER, UserRoleCode.ADMIN].map((code) =>
-      prisma.role.upsert({
-        create: { code, description: `${code} test role` },
-        update: {},
-        where: { code },
-      }),
+    [UserRoleCode.CUSTOMER, UserRoleCode.ADMIN, UserRoleCode.SUPER_ADMIN].map(
+      (code) =>
+        prisma.role.upsert({
+          create: { code, description: `${code} test role` },
+          update: {},
+          where: { code },
+        }),
     ),
   );
 });
@@ -207,6 +208,85 @@ describe("database-backed authentication", () => {
       action: "user.status.changed",
       actorUserId: admin.id,
       reason: "Repeated marketplace policy violation",
+    });
+  });
+
+  it("lets only SUPER_ADMIN offboard another ADMIN and revokes sessions", async () => {
+    const suffix = randomUUID();
+    const superUser = await prisma.user.create({
+      data: { email: `super-${suffix}@nozi.test`, name: "Super Admin" },
+    });
+    const admin = await prisma.user.create({
+      data: {
+        email: `managed-admin-${suffix}@nozi.test`,
+        name: "Managed Admin",
+      },
+    });
+    createdEmails.push(superUser.email, admin.email);
+    auditSubjectIds.push(admin.id);
+    const [superRole, adminRole] = await Promise.all([
+      prisma.role.findUniqueOrThrow({
+        where: { code: UserRoleCode.SUPER_ADMIN },
+      }),
+      prisma.role.findUniqueOrThrow({ where: { code: UserRoleCode.ADMIN } }),
+    ]);
+    await prisma.$transaction([
+      prisma.userRole.create({
+        data: { roleId: superRole.id, userId: superUser.id },
+      }),
+      prisma.userRole.create({
+        data: { roleId: adminRole.id, userId: admin.id },
+      }),
+      prisma.session.create({
+        data: {
+          expiresAt: new Date(Date.now() + 60_000),
+          token: randomUUID(),
+          userId: admin.id,
+        },
+      }),
+    ]);
+    const superActor = buildActorContext({
+      roles: [UserRoleCode.SUPER_ADMIN],
+      status: UserStatus.ACTIVE,
+      userId: superUser.id,
+    });
+    const ordinaryAdmin = buildActorContext({
+      explicitPermissions: [Permission.AdminManage],
+      roles: [UserRoleCode.ADMIN],
+      status: UserStatus.ACTIVE,
+      userId: admin.id,
+    });
+    await expect(
+      setAdminUserStatus(ordinaryAdmin, {
+        reason: "Should not be authorized",
+        status: UserStatus.SUSPENDED,
+        targetUserId: superUser.id,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      setAdminUserStatus(superActor, {
+        reason: "Self protection",
+        status: UserStatus.SUSPENDED,
+        targetUserId: superUser.id,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await setAdminUserStatus(superActor, {
+      reason: "Administrator access review",
+      status: UserStatus.SUSPENDED,
+      targetUserId: admin.id,
+    });
+    await expect(
+      prisma.session.count({ where: { userId: admin.id } }),
+    ).resolves.toBe(0);
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: admin.id } }),
+    ).resolves.toMatchObject({
+      status: UserStatus.SUSPENDED,
+    });
+    await setAdminUserStatus(superActor, {
+      reason: "Administrator access restored",
+      status: UserStatus.ACTIVE,
+      targetUserId: admin.id,
     });
   });
 });

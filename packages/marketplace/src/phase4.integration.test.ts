@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { buildActorContext, type ActorContext } from "@nozi/auth";
+import { buildActorContext, Permission, type ActorContext } from "@nozi/auth";
 import {
   InventoryReservationStatus,
   OrderStatus,
@@ -27,6 +27,8 @@ import {
   updateSellerStore,
 } from "./seller";
 import { sellerStoreUpdateSchema } from "./seller-contracts";
+import { moderateProduct } from "./admin";
+import { getProductBySlug } from "./catalog";
 
 function actor(userId: string, role: UserRoleCode): ActorContext {
   return buildActorContext({
@@ -122,7 +124,10 @@ describe.sequential("seller order scope and transitions", () => {
   it("lists and opens only orders from the seller's stores", async () => {
     const product = await prisma.product.findFirstOrThrow({
       include: { store: true, variants: { take: 1 } },
-      where: { status: ProductStatus.ACTIVE },
+      where: {
+        status: ProductStatus.ACTIVE,
+        variants: { some: { deletedAt: null, isActive: true } },
+      },
     });
     const other = await prisma.product.findFirstOrThrow({
       include: { store: true, variants: { take: 1 } },
@@ -239,6 +244,97 @@ describe.sequential("seller order scope and transitions", () => {
 });
 
 describe.sequential("seller product and store permissions", () => {
+  it("keeps an ACTIVE version live while sensitive edits await moderation", async () => {
+    const store = await prisma.store.findFirstOrThrow();
+    const owner = await sellerActor(store.sellerId, SellerUserRole.OWNER);
+    const category = await prisma.category.findFirstOrThrow({
+      where: { isActive: true },
+    });
+    const base = {
+      categoryId: category.id,
+      compareAtPrice: null,
+      description: "Пилотный подарок с безопасной проверкой изменений.",
+      images: [],
+      name: "Moderation Pilot Gift",
+      preparationTimeMinutes: 30,
+      price: "149.50",
+      slug: `moderation-pilot-${randomUUID()}`,
+      status: ProductStatus.PENDING_REVIEW,
+      stockQuantity: 8,
+      storeId: store.id,
+      variants: [],
+    };
+    const product = await createSellerProduct(owner, base);
+    const adminUser = await createUser(UserRoleCode.ADMIN);
+    const admin = buildActorContext({
+      explicitPermissions: [
+        Permission.AdminAccess,
+        Permission.ProductsModerate,
+      ],
+      roles: [UserRoleCode.ADMIN],
+      status: UserStatus.ACTIVE,
+      userId: adminUser.userId,
+    });
+    await moderateProduct(admin, product.id, {
+      note: "Public description needs a clearer composition",
+      status: ProductStatus.REJECTED,
+    });
+    await expect(
+      prisma.product.findUniqueOrThrow({ where: { id: product.id } }),
+    ).resolves.toMatchObject({
+      moderationNote: "Public description needs a clearer composition",
+      status: ProductStatus.REJECTED,
+    });
+    const rejected = await prisma.product.findUniqueOrThrow({
+      where: { id: product.id },
+    });
+    base.description =
+      "Пилотный подарок с уточнённым составом для безопасной проверки.";
+    await updateSellerProduct(owner, product.id, {
+      ...base,
+      status: ProductStatus.PENDING_REVIEW,
+      version: rejected.version,
+    });
+    await moderateProduct(admin, product.id, { status: ProductStatus.ACTIVE });
+    const live = await prisma.product.findUniqueOrThrow({
+      where: { id: product.id },
+    });
+    await updateSellerProduct(owner, product.id, {
+      ...base,
+      status: ProductStatus.DRAFT,
+      stockQuantity: 11,
+      version: live.version,
+    });
+    await expect(
+      prisma.product.findUniqueOrThrow({ where: { id: product.id } }),
+    ).resolves.toMatchObject({
+      status: ProductStatus.ACTIVE,
+      stockQuantity: 11,
+    });
+    const operational = await prisma.product.findUniqueOrThrow({
+      where: { id: product.id },
+    });
+    await updateSellerProduct(owner, product.id, {
+      ...base,
+      name: "Moderation Pilot Gift Revised",
+      status: ProductStatus.PENDING_REVIEW,
+      stockQuantity: 11,
+      version: operational.version,
+    });
+    await expect(getProductBySlug(base.slug)).resolves.toMatchObject({
+      name: base.name,
+    });
+    await expect(
+      prisma.productRevision.findFirstOrThrow({
+        where: { productId: product.id },
+      }),
+    ).resolves.toMatchObject({ status: "PENDING_REVIEW" });
+    await moderateProduct(admin, product.id, { status: ProductStatus.ACTIVE });
+    await expect(getProductBySlug(base.slug)).resolves.toMatchObject({
+      name: "Moderation Pilot Gift Revised",
+    });
+  });
+
   it("allows a manager to create, edit and archive a scoped product", async () => {
     const store = await prisma.store.findFirstOrThrow();
     const manager = await sellerActor(store.sellerId, SellerUserRole.MANAGER);
