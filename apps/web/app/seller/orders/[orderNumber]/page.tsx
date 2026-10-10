@@ -1,17 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSellerOrder, MarketplaceError } from "@nozi/marketplace";
+import {
+  formatMarketplaceDateTime,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 import { SellerOrderActions } from "../../../../components/seller-order-actions";
+import { ReturnedInventoryActions } from "../../../../components/returned-inventory-actions";
 import { requireSellerPageActor } from "../../../../lib/require-seller-page";
 
-const labels: Record<string, string> = {
-  AWAITING_SELLER_CONFIRMATION: "Ожидает подтверждения",
-  CONFIRMED: "Подтверждён",
-  PREPARING: "Готовится",
-  READY_FOR_PICKUP: "Готов к выдаче",
-  CANCELLED: "Отменён",
-  DELIVERED: "Доставлен",
-};
 const actions: Record<string, ("accept" | "prepare" | "ready" | "reject")[]> = {
   AWAITING_SELLER_CONFIRMATION: ["accept", "reject"],
   CONFIRMED: ["prepare"],
@@ -45,7 +42,7 @@ export default async function SellerOrderPage({
           <p className="text-sm text-[#756e69]">{order.store.name}</p>
           <h1 className="mt-1 text-4xl font-semibold">{order.orderNumber}</h1>
           <span className="mt-3 inline-flex rounded-full bg-[#f2e3e9] px-4 py-2 text-sm font-bold text-[#8f2d56]">
-            {labels[order.status] ?? order.status}
+            {orderStatusMetadata[order.status].label}
           </span>
         </div>
         <SellerOrderActions
@@ -163,13 +160,13 @@ export default async function SellerOrderPage({
             {order.statusHistory.map((entry) => (
               <li key={entry.id}>
                 <p className="font-semibold">
-                  {labels[entry.newStatus] ?? entry.newStatus}
+                  {orderStatusMetadata[entry.newStatus].label}
                 </p>
                 <p className="mt-1 text-xs text-[#756e69]">
-                  {new Intl.DateTimeFormat("ru-RU", {
+                  {formatMarketplaceDateTime(entry.createdAt, {
                     dateStyle: "medium",
                     timeStyle: "short",
-                  }).format(new Date(entry.createdAt))}{" "}
+                  })}{" "}
                   · {entry.actorType}
                 </p>
                 {entry.note ? (
@@ -180,6 +177,14 @@ export default async function SellerOrderPage({
           </ol>
         </aside>
       </div>
+      {order.status === "RETURNED_TO_STORE" &&
+      order.returnDispositions.some((item) => item.decision === null) ? (
+        <div className="mt-6 max-w-xl">
+          <ReturnedInventoryActions
+            endpoint={`/api/v1/seller/orders/${order.orderNumber}/inventory-disposition`}
+          />
+        </div>
+      ) : null}
     </>
   );
 }

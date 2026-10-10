@@ -1,15 +1,8 @@
 import Link from "next/link";
 import { getSellerDashboard } from "@nozi/marketplace";
+import { orderStatusMetadata } from "@nozi/marketplace/display";
 import { requireSellerPageActor } from "../../lib/require-seller-page";
 
-const statusLabels: Record<string, string> = {
-  AWAITING_SELLER_CONFIRMATION: "Новый",
-  CONFIRMED: "Подтверждён",
-  PREPARING: "Готовится",
-  READY_FOR_PICKUP: "Готов",
-  CANCELLED: "Отменён",
-  DELIVERED: "Доставлен",
-};
 export default async function SellerDashboardPage() {
   const data = await getSellerDashboard(await requireSellerPageActor());
   const cards = [
@@ -79,7 +72,7 @@ export default async function SellerDashboardPage() {
                   {order.store.name}
                 </span>
                 <span className="rounded-full bg-[#f5e9ee] px-3 py-1 text-xs font-bold text-[#8f2d56]">
-                  {statusLabels[order.status] ?? order.status}
+                  {orderStatusMetadata[order.status].shortLabel}
                 </span>
                 <span className="font-semibold">{order.grandTotal} TJS</span>
               </Link>

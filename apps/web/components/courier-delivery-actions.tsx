@@ -9,7 +9,6 @@ type Action =
   | "pickup"
   | "start"
   | "deliver"
-  | "return"
   | "returned";
 const nextAction: Record<string, Action | undefined> = {
   ACCEPTED: "arrived",
@@ -17,7 +16,6 @@ const nextAction: Record<string, Action | undefined> = {
   ASSIGNED: "accept",
   ON_THE_WAY: "deliver",
   PICKED_UP: "start",
-  DELIVERY_FAILED: "return",
   RETURNING_TO_STORE: "returned",
 };
 const labels: Record<Action, string> = {
@@ -26,7 +24,6 @@ const labels: Record<Action, string> = {
   deliver: "Заказ доставлен",
   pickup: "Забрал заказ",
   start: "Начать доставку",
-  return: "Возвращаю заказ в магазин",
   returned: "Заказ возвращён в магазин",
 };
 
@@ -45,6 +42,8 @@ export function CourierDeliveryActions({
   const [error, setError] = useState("");
   const [online, setOnline] = useState(true);
   const [showFailure, setShowFailure] = useState(false);
+  const [showDeliveryCode, setShowDeliveryCode] = useState(false);
+  const [deliveryCode, setDeliveryCode] = useState("");
   const [reason, setReason] = useState("RECIPIENT_UNAVAILABLE");
   const [note, setNote] = useState("");
 
@@ -78,12 +77,14 @@ export function CourierDeliveryActions({
       if (!response.ok)
         throw new Error(result.message ?? "Операция не выполнена");
       router.refresh();
+      return true;
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
           : "Нет соединения. Проверьте сеть и повторите.",
       );
+      return false;
     } finally {
       setBusy("");
     }
@@ -91,22 +92,34 @@ export function CourierDeliveryActions({
 
   async function perform() {
     if (!action) return;
+    if (action === "deliver" && deliveryCodeRequired) {
+      setShowDeliveryCode(true);
+      return;
+    }
     const confirmation =
       action === "deliver"
         ? "Подтвердить, что заказ лично передан получателю?"
         : `${labels[action]}?`;
     if (!window.confirm(confirmation)) return;
-    const deliveryCode =
-      action === "deliver" && deliveryCodeRequired
-        ? window.prompt("Введите 6-значный код получателя")
-        : null;
-    if (action === "deliver" && deliveryCodeRequired && !deliveryCode) return;
     await post(
       `/api/v1/courier/deliveries/${encodeURIComponent(orderNumber)}/${action}`,
-      action === "deliver"
-        ? { deliveryCode: deliveryCode ?? undefined }
-        : undefined,
+      undefined,
     );
+  }
+
+  async function confirmDeliveryWithCode() {
+    if (!/^\d{6}$/.test(deliveryCode)) {
+      setError("Введите 6 цифр из сообщения получателя");
+      return;
+    }
+    const delivered = await post(
+      `/api/v1/courier/deliveries/${encodeURIComponent(orderNumber)}/deliver`,
+      { deliveryCode },
+    );
+    if (delivered) {
+      setShowDeliveryCode(false);
+      setDeliveryCode("");
+    }
   }
 
   async function reportFailure() {
@@ -168,6 +181,11 @@ export function CourierDeliveryActions({
           {busy.endsWith(action) ? "Сохраняем…" : labels[action]}
         </button>
       ) : null}
+      {status === "DELIVERY_FAILED" ? (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-center font-bold text-amber-900">
+          Ожидайте решения оператора
+        </p>
+      ) : null}
       {action ? (
         <button
           className="min-h-12 w-full rounded-2xl border border-[#b9cdc3] bg-white px-5 py-3 font-bold text-[#315c4c] disabled:opacity-50"
@@ -221,6 +239,64 @@ export function CourierDeliveryActions({
           >
             Сообщить о проблеме
           </button>
+        </div>
+      ) : null}
+      {showDeliveryCode ? (
+        <div
+          aria-labelledby="delivery-code-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-end bg-black/40 sm:items-center sm:justify-center"
+          role="dialog"
+        >
+          <div className="w-full rounded-t-3xl bg-white p-6 shadow-2xl sm:max-w-sm sm:rounded-3xl">
+            <h2 className="text-xl font-black" id="delivery-code-title">
+              Код получателя
+            </h2>
+            <p className="mt-2 text-sm text-[#5d6b65]">
+              Попросите получателя назвать 6-значный код из SMS. Код не
+              отображается курьеру нигде в приложении.
+            </p>
+            <input
+              autoComplete="one-time-code"
+              autoFocus
+              className="mt-5 w-full rounded-2xl border-2 border-[#8ebca8] px-4 py-4 text-center text-3xl font-black tracking-[.35em]"
+              inputMode="numeric"
+              maxLength={6}
+              onChange={(event) =>
+                setDeliveryCode(
+                  event.target.value.replace(/\D/g, "").slice(0, 6),
+                )
+              }
+              pattern="[0-9]{6}"
+              value={deliveryCode}
+            />
+            {error ? (
+              <p
+                className="mt-3 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-800"
+                role="alert"
+              >
+                {error}
+              </p>
+            ) : null}
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                className="rounded-xl border px-4 py-3 font-bold"
+                disabled={busy !== ""}
+                onClick={() => setShowDeliveryCode(false)}
+                type="button"
+              >
+                Назад
+              </button>
+              <button
+                className="rounded-xl bg-[#17624a] px-4 py-3 font-bold text-white disabled:opacity-50"
+                disabled={busy !== "" || deliveryCode.length !== 6}
+                onClick={() => void confirmDeliveryWithCode()}
+                type="button"
+              >
+                {busy ? "Проверяем…" : "Подтвердить"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
       {error ? (

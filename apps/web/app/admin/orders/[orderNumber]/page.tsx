@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { Permission } from "@nozi/auth";
 import { getAdminOrder, listCouriers } from "@nozi/marketplace";
+import {
+  courierAssignmentStatusLabels,
+  formatMarketplaceDateTime,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 import { requireAdminPageActor } from "../../../../lib/require-admin-page";
 import { AdminOrderActions } from "../../../../components/admin-order-actions";
+import { ReturnedInventoryActions } from "../../../../components/returned-inventory-actions";
 export default async function AdminOrderPage({
   params,
 }: {
@@ -19,6 +25,9 @@ export default async function AdminOrderPage({
     order.courierAssignments
       .filter((assignment) => assignment.status === "DELIVERY_FAILED")
       .map((assignment) => assignment.courierId),
+  );
+  const failedAssignment = order.courierAssignments.find(
+    (assignment) => assignment.status === "DELIVERY_FAILED",
   );
   const couriers = courierRows
     .filter(
@@ -41,12 +50,13 @@ export default async function AdminOrderPage({
           </p>
           <h1 className="mt-1 text-4xl font-semibold">{order.orderNumber}</h1>
           <span className="mt-3 inline-flex rounded-full bg-white px-4 py-2 text-xs font-bold shadow-sm">
-            {order.status}
+            {orderStatusMetadata[order.status].label}
           </span>
         </div>
         {actor.permissions.has(Permission.OrdersManage) ? (
           <div className="min-w-[340px] rounded-2xl border bg-white p-4">
             <AdminOrderActions
+              canReturnToStore={Boolean(failedAssignment?.pickedUpAt)}
               couriers={couriers}
               orderNumber={order.orderNumber}
               status={order.status}
@@ -54,6 +64,15 @@ export default async function AdminOrderPage({
           </div>
         ) : null}
       </div>
+      {order.status === "RETURNED_TO_STORE" &&
+      order.returnDispositions.some((item) => item.decision === null) &&
+      actor.permissions.has(Permission.OrdersManage) ? (
+        <div className="mt-5 max-w-xl">
+          <ReturnedInventoryActions
+            endpoint={`/api/v1/admin/orders/${order.orderNumber}/inventory-disposition`}
+          />
+        </div>
+      ) : null}
       <div className="mt-7 grid gap-6 xl:grid-cols-[1.2fr_.8fr_.75fr]">
         <div className="space-y-6">
           <section className="rounded-2xl border bg-white p-6">
@@ -130,11 +149,8 @@ export default async function AdminOrderPage({
                 <p className="mt-3 text-sm" key={a.id}>
                   <strong>{a.courier.name}</strong>
                   <br />
-                  {a.status} ·{" "}
-                  {new Intl.DateTimeFormat("ru-RU", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  }).format(a.assignedAt)}
+                  {courierAssignmentStatusLabels[a.status]} ·{" "}
+                  {formatMarketplaceDateTime(a.assignedAt)}
                 </p>
               ))
             ) : (
@@ -156,13 +172,12 @@ export default async function AdminOrderPage({
           <ol className="mt-4 space-y-4 border-l pl-4">
             {order.statusHistory.map((h) => (
               <li key={h.id}>
-                <strong className="text-sm">{h.newStatus}</strong>
+                <strong className="text-sm">
+                  {orderStatusMetadata[h.newStatus].label}
+                </strong>
                 <small className="block text-slate-500">
-                  {new Intl.DateTimeFormat("ru-RU", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  }).format(h.createdAt)}{" "}
-                  · {h.changedBy?.name ?? h.actorType}
+                  {formatMarketplaceDateTime(h.createdAt)} ·{" "}
+                  {h.changedBy?.name ?? h.actorType}
                 </small>
               </li>
             ))}

@@ -28,6 +28,14 @@ export default async function EditSellerProductPage({
     throw error;
   }
   const image = product.images[0];
+  const revision = product.latestRevision;
+  const revisionImages = Array.isArray(revision?.images)
+    ? (revision.images as { altText: string; objectKey: string }[])
+    : [];
+  const revisionVariants = Array.isArray(revision?.variants)
+    ? (revision.variants as unknown as typeof product.variants)
+    : null;
+  const editImage = revisionImages[0] ?? image;
   return (
     <>
       <p className="text-xs font-bold tracking-[.18em] text-[#9a355c] uppercase">
@@ -41,21 +49,30 @@ export default async function EditSellerProductPage({
       <SellerProductForm
         categories={categories}
         stores={shell.stores}
+        moderation={{
+          liveStatus: product.status,
+          reason: revision?.rejectionReason ?? product.moderationNote,
+          revisionStatus: revision?.status ?? null,
+        }}
         initial={{
-          categoryId: product.categoryId,
-          compareAtPrice: product.compareAtPrice,
-          description: product.description,
+          categoryId: revision?.categoryId ?? product.categoryId,
+          compareAtPrice: revision?.compareAtPrice ?? product.compareAtPrice,
+          description: revision?.description ?? product.description,
           id: product.id,
-          imageAlt: image?.altText ?? product.name,
-          imageKey: image?.objectKey ?? "",
-          name: product.name,
+          imageAlt: editImage?.altText ?? revision?.name ?? product.name,
+          imageKey: editImage?.objectKey ?? "",
+          name: revision?.name ?? product.name,
           preparationTimeMinutes: product.preparationTimeMinutes,
-          price: product.price,
-          slug: product.slug,
-          status: product.status === "ACTIVE" ? "ACTIVE" : "DRAFT",
+          price: revision?.price ?? product.price,
+          slug: revision?.slug ?? product.slug,
+          status:
+            product.status === "PENDING_REVIEW" ||
+            revision?.status === "PENDING_REVIEW"
+              ? "PENDING_REVIEW"
+              : "DRAFT",
           stockQuantity: product.stockQuantity,
           storeId: product.storeId,
-          variants: product.variants
+          variants: (revisionVariants ?? product.variants)
             .filter((v) => !v.deletedAt)
             .map((v) => ({
               absolutePrice: v.absolutePrice,

@@ -2,22 +2,12 @@ import Image from "next/image";
 import Link from "next/link";
 
 import type { CustomerOrderView } from "@nozi/marketplace";
+import {
+  formatMarketplaceDateTime,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 
 import { formatMoney } from "./product-card";
-
-const statusLabels: Record<string, string> = {
-  AWAITING_SELLER_CONFIRMATION: "Ожидает подтверждения магазина",
-  CANCELLED: "Отменён",
-  CONFIRMED: "Подтверждён",
-  COURIER_ASSIGNED: "Курьер назначен",
-  CREATED: "Создан",
-  DELIVERED: "Доставлен",
-  ON_THE_WAY: "В пути",
-  PICKED_UP: "Передан курьеру",
-  PREPARING: "Готовится",
-  READY_FOR_PICKUP: "Готов к передаче",
-  REFUNDED: "Возврат выполнен",
-};
 
 export function OrderView({
   order,
@@ -55,7 +45,7 @@ export function OrderView({
                 </h2>
               </div>
               <span className="rounded-full bg-[#f3e5ea] px-4 py-2 text-xs font-semibold text-[#8f2d56]">
-                {statusLabels[order.status]}
+                {orderStatusMetadata[order.status].label}
               </span>
             </div>
             <Link
@@ -179,16 +169,13 @@ export function OrderView({
                   <span className="relative mt-1.5 h-4 w-4 shrink-0 rounded-full border-4 border-[#f4dce4] bg-[#8f2d56]" />
                   <div>
                     <p className="text-sm font-medium">
-                      {statusLabels[entry.newStatus]}
+                      {orderStatusMetadata[entry.newStatus].label}
                     </p>
                     <time
                       className="text-xs text-[#81736e]"
                       dateTime={entry.createdAt}
                     >
-                      {new Intl.DateTimeFormat("ru-RU", {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      }).format(new Date(entry.createdAt))}
+                      {formatMarketplaceDateTime(entry.createdAt)}
                     </time>
                   </div>
                 </li>

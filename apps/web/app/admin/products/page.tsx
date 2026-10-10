@@ -1,14 +1,19 @@
 import { Permission } from "@nozi/auth";
-import { adminPageSchema, listAdminProducts } from "@nozi/marketplace";
+import Link from "next/link";
+import { adminProductFilterSchema, listAdminProducts } from "@nozi/marketplace";
 import { requireAdminPageActor } from "../../../lib/require-admin-page";
-import { AdminResourceAction } from "../../../components/admin-resource-action";
+import { AdminProductModerationActions } from "../../../components/admin-product-moderation-actions";
 export default async function AdminProductsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const raw = await searchParams;
-  const input = adminPageSchema.parse({ page: raw.page, query: raw.query });
+  const input = adminProductFilterSchema.parse({
+    page: raw.page,
+    query: raw.query,
+    status: raw.status,
+  });
   const data = await listAdminProducts(
     await requireAdminPageActor(Permission.ProductsModerate),
     input,
@@ -16,6 +21,27 @@ export default async function AdminProductsPage({
   return (
     <>
       <h1 className="text-4xl font-semibold">Product moderation</h1>
+      <nav className="mt-5 flex gap-2 overflow-x-auto">
+        {[
+          ["PENDING_REVIEW", "Ожидают проверки"],
+          ["ALL", "Все"],
+          ["ACTIVE", "Опубликованы"],
+          ["HIDDEN", "Скрыты"],
+          ["REJECTED", "Отклонены"],
+        ].map(([value, label]) => (
+          <Link
+            className={
+              input.status === value
+                ? "rounded-full bg-[#172131] px-4 py-2 text-sm text-white"
+                : "rounded-full border bg-white px-4 py-2 text-sm"
+            }
+            href={`/admin/products?status=${value}`}
+            key={value}
+          >
+            {label}
+          </Link>
+        ))}
+      </nav>
       <form className="mt-5 flex gap-2">
         <input
           className="flex-1 rounded-xl border bg-white px-4 py-3"
@@ -23,6 +49,7 @@ export default async function AdminProductsPage({
           name="query"
           placeholder="Товар или магазин"
         />
+        <input name="status" type="hidden" value={input.status} />
         <button className="rounded-xl bg-[#172131] px-5 text-white">
           Найти
         </button>
@@ -43,21 +70,25 @@ export default async function AdminProductsPage({
               <span>
                 {p.price} {p.currencyCode}
               </span>
-              <span className="font-bold">{p.status}</span>
-              <span>Stock {p.stockQuantity - p.reservedQuantity}</span>
-              <span className="flex gap-2">
-                <AdminResourceAction
-                  body={{ status: "ACTIVE" }}
-                  label="Approve / show"
-                  path={`/api/v1/admin/products/${p.id}`}
-                />
-                <AdminResourceAction
-                  body={{ note: "Hidden by moderation", status: "HIDDEN" }}
-                  label="Hide"
-                  path={`/api/v1/admin/products/${p.id}`}
-                  tone="danger"
-                />
+              <span className="font-bold">
+                {p.revisions[0]?.status === "PENDING_REVIEW"
+                  ? "PENDING_REVIEW"
+                  : p.status}
+                {p.revisions[0]?.rejectionReason ? (
+                  <small className="block max-w-52 font-normal text-rose-700">
+                    {p.revisions[0].rejectionReason}
+                  </small>
+                ) : null}
               </span>
+              <span>Stock {p.stockQuantity - p.reservedQuantity}</span>
+              <AdminProductModerationActions
+                productId={p.id}
+                status={
+                  p.revisions[0]?.status === "PENDING_REVIEW"
+                    ? "PENDING_REVIEW"
+                    : p.status
+                }
+              />
             </div>
           ))}
         </div>

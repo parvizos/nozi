@@ -1,19 +1,14 @@
 import { getCourierDelivery, MarketplaceError } from "@nozi/marketplace";
+import {
+  courierAssignmentStatusLabels,
+  formatDeliveryWindowTime,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CourierDeliveryActions } from "../../../../components/courier-delivery-actions";
 import { requireCourierPageActor } from "../../../../lib/require-courier-page";
-
-const labels: Record<string, string> = {
-  ACCEPTED: "Задание принято",
-  ARRIVED_AT_STORE: "В магазине",
-  ASSIGNED: "Новое назначение",
-  CANCELLED: "Отменено",
-  DELIVERED: "Доставлено",
-  ON_THE_WAY: "В пути к получателю",
-  PICKED_UP: "Заказ у курьера",
-};
 
 export default async function CourierDeliveryPage({
   params,
@@ -35,12 +30,6 @@ export default async function CourierDeliveryPage({
   const mapQuery = encodeURIComponent(
     [address?.line1, address?.cityName].filter(Boolean).join(", "),
   );
-  const time = (value: Date) =>
-    new Intl.DateTimeFormat("ru-RU", {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "UTC",
-    }).format(value);
   return (
     <>
       <Link
@@ -54,11 +43,13 @@ export default async function CourierDeliveryPage({
           {delivery.order.orderNumber}
         </p>
         <h1 className="mt-1 text-3xl font-black">
-          {labels[delivery.status] ?? delivery.status}
+          {courierAssignmentStatusLabels[delivery.status]}
         </h1>
         <p className="mt-2 font-bold text-[#49685b]">
-          {time(delivery.order.requestedDeliveryWindowStart)}–
-          {time(delivery.order.requestedDeliveryWindowEnd)}
+          {formatDeliveryWindowTime(
+            delivery.order.requestedDeliveryWindowStart,
+          )}
+          –{formatDeliveryWindowTime(delivery.order.requestedDeliveryWindowEnd)}
         </p>
       </div>
 
@@ -75,7 +66,7 @@ export default async function CourierDeliveryPage({
           </p>
           <p className="mt-2 text-sm">
             Подготовка: {delivery.order.store.defaultPreparationMinutes} мин ·{" "}
-            {delivery.order.status}
+            {orderStatusMetadata[delivery.order.status].shortLabel}
           </p>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <a

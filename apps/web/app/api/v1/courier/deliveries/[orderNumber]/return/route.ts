@@ -1,8 +1,15 @@
-import { handleCourierDeliveryAction } from "../../../../../../../lib/courier-delivery-action";
+import { AuthorizationError } from "@nozi/auth";
+import { courierApi } from "../../../../../../../lib/courier-api";
 
-export function POST(
-  request: Request,
-  { params }: { params: Promise<{ orderNumber: string }> },
-) {
-  return handleCourierDeliveryAction(request, params, "RETURN");
+export function POST(request: Request) {
+  return courierApi(
+    request,
+    async () => {
+      throw new AuthorizationError(
+        "FORBIDDEN",
+        "Решение о возврате принимает оператор",
+      );
+    },
+    { mutation: true },
+  );
 }

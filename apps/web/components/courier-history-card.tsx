@@ -1,3 +1,8 @@
+import {
+  courierAssignmentStatusLabels,
+  formatMarketplaceDateTime,
+} from "@nozi/marketplace/display";
+
 export function CourierHistoryCard({
   delivery,
 }: {
@@ -21,7 +26,11 @@ export function CourierHistoryCard({
           <h2 className="mt-1 text-xl font-black">{delivery.storeName}</h2>
         </div>
         <span className="rounded-full bg-[#e5f3ec] px-3 py-1.5 text-xs font-bold text-[#17624a]">
-          {delivery.status}
+          {
+            courierAssignmentStatusLabels[
+              delivery.status as keyof typeof courierAssignmentStatusLabels
+            ]
+          }
         </span>
       </div>
       <p className="mt-4 text-sm text-[#4a5f56]">
@@ -31,11 +40,10 @@ export function CourierHistoryCard({
         className="mt-2 block text-sm font-semibold"
         dateTime={(delivery.deliveredAt ?? delivery.updatedAt).toISOString()}
       >
-        {new Intl.DateTimeFormat("ru-RU", {
+        {formatMarketplaceDateTime(delivery.deliveredAt ?? delivery.updatedAt, {
           dateStyle: "medium",
           timeStyle: "short",
-          timeZone: "Asia/Dushanbe",
-        }).format(delivery.deliveredAt ?? delivery.updatedAt)}
+        })}
       </time>
     </article>
   );

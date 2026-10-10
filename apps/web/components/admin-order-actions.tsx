@@ -1,11 +1,14 @@
 "use client";
+import { marketplaceDateInputValue } from "@nozi/marketplace/display";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 export function AdminOrderActions({
+  canReturnToStore,
   couriers,
   orderNumber,
   status,
 }: {
+  canReturnToStore: boolean;
   couriers: { id: string; name: string }[];
   orderNumber: string;
   status: string;
@@ -14,6 +17,7 @@ export function AdminOrderActions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [courierId, setCourierId] = useState(couriers[0]?.id ?? "");
+  const localToday = marketplaceDateInputValue();
   async function call(path: string, body: unknown) {
     setBusy(true);
     setError("");
@@ -88,6 +92,9 @@ export function AdminOrderActions({
               <input
                 className="rounded-lg border px-2 py-2 text-sm"
                 id="retry-date"
+                defaultValue={localToday}
+                min={localToday}
+                required
                 type="date"
               />
               <input
@@ -125,14 +132,16 @@ export function AdminOrderActions({
               >
                 Повторить доставку
               </button>
-              <button
-                className="rounded-lg border px-3 py-2 text-sm font-semibold"
-                disabled={busy}
-                onClick={() => void call("return-to-store", {})}
-                type="button"
-              >
-                Вернуть в магазин
-              </button>
+              {canReturnToStore ? (
+                <button
+                  className="rounded-lg border px-3 py-2 text-sm font-semibold"
+                  disabled={busy}
+                  onClick={() => void call("return-to-store", {})}
+                  type="button"
+                >
+                  Вернуть в магазин
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}

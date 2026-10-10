@@ -1,16 +1,8 @@
+import {
+  courierAssignmentStatusLabels,
+  formatDeliveryWindowTime,
+} from "@nozi/marketplace/display";
 import Link from "next/link";
-
-const statusLabels: Record<string, string> = {
-  ACCEPTED: "Задание принято",
-  ARRIVED_AT_STORE: "В магазине",
-  ASSIGNED: "Новое назначение",
-  CANCELLED: "Отменено",
-  DELIVERED: "Доставлено",
-  DELIVERY_FAILED: "Не доставлено",
-  ON_THE_WAY: "В пути",
-  PICKED_UP: "Заказ получен",
-  RETURNING_TO_STORE: "Возврат в магазин",
-};
 
 export function CourierDeliveryCard({
   delivery,
@@ -28,12 +20,6 @@ export function CourierDeliveryCard({
     status: string;
   };
 }) {
-  const time = (value: Date) =>
-    new Intl.DateTimeFormat("ru-RU", {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "UTC",
-    }).format(value);
   return (
     <Link
       className="block rounded-3xl border border-[#d8e4dd] bg-white p-5 shadow-[0_12px_35px_rgba(26,79,61,.06)] transition hover:-translate-y-0.5 hover:border-[#8ebca8]"
@@ -49,15 +35,19 @@ export function CourierDeliveryCard({
           </h2>
         </div>
         <span className="rounded-full bg-[#e5f3ec] px-3 py-1.5 text-xs font-bold text-[#17624a]">
-          {statusLabels[delivery.status] ?? delivery.status}
+          {
+            courierAssignmentStatusLabels[
+              delivery.status as keyof typeof courierAssignmentStatusLabels
+            ]
+          }
         </span>
       </div>
       <p className="mt-4 text-sm text-[#4a5f56]">
         {delivery.order.deliveryAddress?.line1 ?? "Адрес уточняется"}
       </p>
       <p className="mt-3 font-bold">
-        {time(delivery.order.requestedDeliveryWindowStart)}–
-        {time(delivery.order.requestedDeliveryWindowEnd)}
+        {formatDeliveryWindowTime(delivery.order.requestedDeliveryWindowStart)}–
+        {formatDeliveryWindowTime(delivery.order.requestedDeliveryWindowEnd)}
       </p>
       {delivery.requiresAdminAttention ? (
         <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">

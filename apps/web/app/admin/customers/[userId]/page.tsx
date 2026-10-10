@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Permission } from "@nozi/auth";
 import { getAdminCustomer } from "@nozi/marketplace";
+import { orderStatusMetadata } from "@nozi/marketplace/display";
 import { requireAdminPageActor } from "../../../../lib/require-admin-page";
-import { AdminResourceAction } from "../../../../components/admin-resource-action";
+import { AdminUserStatusAction } from "../../../../components/admin-user-status-action";
 export default async function AdminCustomerPage({
   params,
 }: {
@@ -27,14 +28,10 @@ export default async function AdminCustomerPage({
           </p>
         </div>
         {actor.permissions.has(Permission.CustomersManage) ? (
-          <AdminResourceAction
-            body={{
-              reason: "Support account status change",
-              status: customer.status === "SUSPENDED" ? "ACTIVE" : "SUSPENDED",
-            }}
+          <AdminUserStatusAction
             label={customer.status === "SUSPENDED" ? "Reactivate" : "Suspend"}
             path={`/api/v1/admin/customers/${customer.id}`}
-            tone={customer.status === "SUSPENDED" ? "default" : "danger"}
+            status={customer.status === "SUSPENDED" ? "ACTIVE" : "SUSPENDED"}
           />
         ) : null}
       </div>
@@ -50,7 +47,7 @@ export default async function AdminCustomerPage({
               <span>
                 <strong>{o.orderNumber}</strong>
                 <small className="block text-slate-500">
-                  {o.store.name} · {o.status}
+                  {o.store.name} · {orderStatusMetadata[o.status].shortLabel}
                 </small>
               </span>
               <strong>{o.grandTotal} TJS</strong>

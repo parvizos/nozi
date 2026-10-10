@@ -9,6 +9,7 @@ import {
   getCheckoutCustomerProfile,
   testPaymentsEnabled,
 } from "@nozi/marketplace";
+import { marketplaceDateInputValue } from "@nozi/marketplace/display";
 
 import { CheckoutForm } from "../../components/checkout-form";
 import { SiteFooter } from "../../components/site-footer";
@@ -19,20 +20,6 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 export const dynamic = "force-dynamic";
-
-function todayInDushanbe(): string {
-  const today = new Date();
-  const parts = new Intl.DateTimeFormat("en-US", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "Asia/Dushanbe",
-    year: "numeric",
-  }).formatToParts(today);
-  const value = Object.fromEntries(
-    parts.map((part) => [part.type, part.value]),
-  );
-  return `${value.year}-${value.month}-${value.day}`;
-}
 
 export default async function CheckoutPage() {
   const actor = await getActorContext(await headers());
@@ -58,7 +45,7 @@ export default async function CheckoutPage() {
           defaultName={profile.name}
           defaultPhone={profile.phoneNumber ?? ""}
           enableTestPayments={testPaymentsEnabled()}
-          minimumDate={todayInDushanbe()}
+          minimumDate={marketplaceDateInputValue()}
         />
       </main>
       <SiteFooter />

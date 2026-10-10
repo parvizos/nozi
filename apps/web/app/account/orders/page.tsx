@@ -6,24 +6,15 @@ import { redirect } from "next/navigation";
 import { getActorContext } from "@nozi/auth";
 import { UserRoleCode } from "@nozi/database";
 import { listCustomerOrders } from "@nozi/marketplace";
+import {
+  formatMarketplaceDate,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 
 import { formatMoney } from "../../../components/product-card";
 import { SiteFooter } from "../../../components/site-footer";
 import { SiteHeader } from "../../../components/site-header";
 
-const labels: Record<string, string> = {
-  AWAITING_SELLER_CONFIRMATION: "Ожидает подтверждения",
-  CANCELLED: "Отменён",
-  CONFIRMED: "Подтверждён",
-  COURIER_ASSIGNED: "Курьер назначен",
-  CREATED: "Создан",
-  DELIVERED: "Доставлен",
-  ON_THE_WAY: "В пути",
-  PICKED_UP: "Передан курьеру",
-  PREPARING: "Готовится",
-  READY_FOR_PICKUP: "Готов к передаче",
-  REFUNDED: "Возврат",
-};
 export const metadata: Metadata = {
   title: "Мои заказы",
   robots: { index: false },
@@ -64,9 +55,7 @@ export default async function AccountOrdersPage() {
                   <p className="font-semibold">{order.orderNumber}</p>
                   <p className="mt-1 text-sm text-[#756865]">
                     {order.store.name} ·{" "}
-                    {new Intl.DateTimeFormat("ru-RU", {
-                      dateStyle: "medium",
-                    }).format(new Date(order.createdAt))}
+                    {formatMarketplaceDate(order.createdAt)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -74,7 +63,7 @@ export default async function AccountOrdersPage() {
                     {formatMoney(order.grandTotal, order.currencyCode)}
                   </p>
                   <p className="mt-1 text-xs text-[#8f2d56]">
-                    {labels[order.status]}
+                    {orderStatusMetadata[order.status].shortLabel}
                   </p>
                 </div>
               </Link>

@@ -23,7 +23,7 @@ type Initial = {
   preparationTimeMinutes: number | null;
   price: string;
   slug: string;
-  status: "ACTIVE" | "DRAFT";
+  status: "DRAFT" | "PENDING_REVIEW";
   stockQuantity: number;
   storeId: string;
   variants: Variant[];
@@ -33,10 +33,16 @@ export function SellerProductForm({
   categories,
   initial,
   stores,
+  moderation,
 }: {
   categories: { id: string; name: string }[];
   initial: Initial;
   stores: { id: string; name: string }[];
+  moderation?: {
+    liveStatus: string;
+    reason: string | null;
+    revisionStatus: string | null;
+  };
 }) {
   const router = useRouter();
   const [form, setForm] = useState(initial);
@@ -53,6 +59,10 @@ export function SellerProductForm({
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent)
+      .submitter as HTMLButtonElement | null;
+    const requestedStatus =
+      submitter?.value === "PENDING_REVIEW" ? "PENDING_REVIEW" : "DRAFT";
     setBusy(true);
     setError("");
     const body = {
@@ -73,7 +83,7 @@ export function SellerProductForm({
       preparationTimeMinutes: form.preparationTimeMinutes,
       price: form.price,
       slug: form.slug,
-      status: form.status,
+      status: requestedStatus,
       stockQuantity: Number(form.stockQuantity),
       storeId: form.storeId,
       variants: form.variants.map((v, i) => ({
@@ -263,6 +273,21 @@ export function SellerProductForm({
         </section>
       </div>
       <aside className="space-y-6">
+        {moderation ? (
+          <section className="rounded-2xl border border-[#ded9d2] bg-white p-5 text-sm">
+            <p className="font-semibold">Публикация: {moderation.liveStatus}</p>
+            {moderation.revisionStatus ? (
+              <p className="mt-1 text-[#756e69]">
+                Изменения: {moderation.revisionStatus}
+              </p>
+            ) : null}
+            {moderation.reason ? (
+              <p className="mt-3 rounded-xl bg-rose-50 p-3 text-rose-800">
+                Причина отклонения: {moderation.reason}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
         <section className="rounded-2xl border border-[#ded9d2] bg-white p-6">
           <h2 className="text-xl font-semibold">Продажа</h2>
           <div className="mt-4 space-y-4">
@@ -319,19 +344,6 @@ export function SellerProductForm({
                 value={form.preparationTimeMinutes ?? 60}
               />
             </label>
-            <label className="block text-sm font-semibold">
-              Статус
-              <select
-                className="mt-2 w-full rounded-xl border p-3 font-normal"
-                onChange={(e) =>
-                  set("status", e.target.value as "ACTIVE" | "DRAFT")
-                }
-                value={form.status}
-              >
-                <option value="ACTIVE">Активен</option>
-                <option value="DRAFT">Черновик / выключен</option>
-              </select>
-            </label>
           </div>
         </section>
         <section className="rounded-2xl border border-[#ded9d2] bg-white p-6">
@@ -365,13 +377,24 @@ export function SellerProductForm({
             {error}
           </p>
         ) : null}
-        <button
-          className="w-full rounded-xl bg-[#8f2d56] px-5 py-3.5 font-semibold text-white disabled:opacity-50"
-          disabled={busy}
-          type="submit"
-        >
-          {busy ? "Сохраняем…" : "Сохранить товар"}
-        </button>
+        <div className="grid gap-2">
+          <button
+            className="w-full rounded-xl border border-[#8f2d56] bg-white px-5 py-3.5 font-semibold text-[#8f2d56] disabled:opacity-50"
+            disabled={busy}
+            type="submit"
+            value="DRAFT"
+          >
+            {busy ? "Сохраняем…" : "Сохранить черновик"}
+          </button>
+          <button
+            className="w-full rounded-xl bg-[#8f2d56] px-5 py-3.5 font-semibold text-white disabled:opacity-50"
+            disabled={busy}
+            type="submit"
+            value="PENDING_REVIEW"
+          >
+            {busy ? "Отправляем…" : "Отправить на проверку"}
+          </button>
+        </div>
       </aside>
     </form>
   );

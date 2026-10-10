@@ -1,18 +1,16 @@
 import Link from "next/link";
 import { Permission } from "@nozi/auth";
 import { adminOrderFilterSchema, listAdminOrders } from "@nozi/marketplace";
+import {
+  formatMarketplaceDateTime,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 import { requireAdminPageActor } from "../../../lib/require-admin-page";
 import { AdminPolling } from "../../../components/admin-polling";
-const statuses = [
+const statuses: ("ALL" | keyof typeof orderStatusMetadata)[] = [
   "ALL",
-  "AWAITING_SELLER_CONFIRMATION",
-  "PREPARING",
-  "READY_FOR_PICKUP",
-  "COURIER_ASSIGNED",
-  "ON_THE_WAY",
-  "DELIVERED",
-  "CANCELLED",
-] as const;
+  ...(Object.keys(orderStatusMetadata) as (keyof typeof orderStatusMetadata)[]),
+];
 export default async function AdminOrdersPage({
   searchParams,
 }: {
@@ -53,7 +51,7 @@ export default async function AdminOrdersPage({
         >
           {statuses.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {s === "ALL" ? "Все статусы" : orderStatusMetadata[s].shortLabel}
             </option>
           ))}
         </select>
@@ -80,10 +78,7 @@ export default async function AdminOrdersPage({
               <span>
                 <strong>{o.orderNumber}</strong>
                 <small className="block text-slate-500">
-                  {new Intl.DateTimeFormat("ru-RU", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  }).format(new Date(o.createdAt))}
+                  {formatMarketplaceDateTime(o.createdAt)}
                 </small>
               </span>
               <span>
@@ -98,7 +93,7 @@ export default async function AdminOrdersPage({
                 {o.requestedDeliveryWindowStart}–{o.requestedDeliveryWindowEnd}
               </span>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">
-                {o.status}
+                {orderStatusMetadata[o.status].shortLabel}
               </span>
               <span>{o.courierAssignments[0]?.courier.name ?? "—"}</span>
               <span>

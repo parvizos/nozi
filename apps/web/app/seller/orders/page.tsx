@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { listSellerOrders, sellerOrderFilterSchema } from "@nozi/marketplace";
+import {
+  formatMarketplaceDateTime,
+  orderStatusMetadata,
+} from "@nozi/marketplace/display";
 import { requireSellerPageActor } from "../../../lib/require-seller-page";
 
 const filters = [
@@ -11,7 +15,6 @@ const filters = [
   ["CANCELLED", "Отменены"],
   ["DELIVERED", "Доставлены"],
 ] as const;
-const labels: Record<string, string> = Object.fromEntries(filters);
 export default async function SellerOrdersPage({
   searchParams,
 }: {
@@ -66,10 +69,7 @@ export default async function SellerOrdersPage({
                 <span>
                   <strong>{order.orderNumber}</strong>
                   <small className="mt-1 block text-[#7b746f]">
-                    {new Intl.DateTimeFormat("ru-RU", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    }).format(new Date(order.createdAt))}
+                    {formatMarketplaceDateTime(order.createdAt)}
                   </small>
                 </span>
                 <span>{order.store.name}</span>
@@ -81,7 +81,7 @@ export default async function SellerOrdersPage({
                   {order.requestedDeliveryWindowEnd}
                 </span>
                 <span className="text-sm font-semibold text-[#8f2d56]">
-                  {labels[order.status] ?? order.status}
+                  {orderStatusMetadata[order.status].shortLabel}
                 </span>
                 <strong>
                   {order.grandTotal} {order.currencyCode}

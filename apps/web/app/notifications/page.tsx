@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { getActorContext } from "@nozi/auth";
 import { getNotificationSummary } from "@nozi/notifications";
+import { formatMarketplaceDateTime } from "@nozi/marketplace/display";
 
 import { NotificationActions } from "../../components/notification-actions";
 import { SiteHeader } from "../../components/site-header";
@@ -53,10 +54,10 @@ export default async function NotificationsPage() {
                       {item.body}
                     </p>
                     <time className="mt-2 block text-xs text-[#948681]">
-                      {new Intl.DateTimeFormat("ru-RU", {
+                      {formatMarketplaceDateTime(item.createdAt, {
                         dateStyle: "medium",
                         timeStyle: "short",
-                      }).format(item.createdAt)}
+                      })}
                     </time>
                   </div>
                   {!item.readAt ? (

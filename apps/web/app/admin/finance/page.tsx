@@ -65,15 +65,27 @@ export default async function AdminFinancePage({
             .filter(
               (balance) => Number(balance.outstanding) > 0 && balance.courier,
             )
-            .map((balance) => (
-              <AdminCashSettlement
-                amount={balance.outstanding}
-                courierId={balance.courier!.id}
-                courierName={balance.courier!.name}
-                currencyCode={balance.currencyCode}
-                key={`${balance.courier!.id}:${balance.currencyCode}`}
-              />
-            ))}
+            .map((balance) =>
+              actor.permissions.has(Permission.FinanceCashManage) ? (
+                <AdminCashSettlement
+                  amount={balance.outstanding}
+                  courierId={balance.courier!.id}
+                  courierName={balance.courier!.name}
+                  currencyCode={balance.currencyCode}
+                  key={`${balance.courier!.id}:${balance.currencyCode}`}
+                />
+              ) : (
+                <article
+                  className="rounded-xl border p-4"
+                  key={`${balance.courier!.id}:${balance.currencyCode}`}
+                >
+                  <p className="font-semibold">{balance.courier!.name}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {balance.outstanding} {balance.currencyCode}
+                  </p>
+                </article>
+              ),
+            )}
         </div>
       </section>
       <div className="mt-6 grid gap-6 lg:grid-cols-[.6fr_1.4fr]">

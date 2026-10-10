@@ -1,5 +1,6 @@
 import { Permission } from "@nozi/auth";
 import { auditFilterSchema, listAuditLogs } from "@nozi/marketplace";
+import { formatMarketplaceDateTime } from "@nozi/marketplace/display";
 import { requireAdminPageActor } from "../../../lib/require-admin-page";
 export default async function AdminAuditPage({
   searchParams,
@@ -67,10 +68,10 @@ export default async function AdminAuditPage({
               <span>
                 <strong>{e.action}</strong>
                 <small className="block text-slate-500">
-                  {new Intl.DateTimeFormat("ru-RU", {
+                  {formatMarketplaceDateTime(e.createdAt, {
                     dateStyle: "short",
                     timeStyle: "medium",
-                  }).format(e.createdAt)}
+                  })}
                 </small>
               </span>
               <span>
